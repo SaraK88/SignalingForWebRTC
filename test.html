@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agora Token Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; }
+        .test-section { margin: 20px 0; padding: 20px; border: 1px solid #ddd; border-radius: 5px; }
+        button { padding: 10px 20px; margin: 5px; background: #007bff; color: white; border: none; border-radius: 3px; cursor: pointer; }
+        button:hover { background: #0056b3; }
+        .result { margin: 10px 0; padding: 10px; background: #f8f9fa; border-radius: 3px; word-break: break-all; }
+        .error { background: #f8d7da; color: #721c24; }
+        .success { background: #d4edda; color: #155724; }
+        input { padding: 8px; margin: 5px; width: 200px; }
+    </style>
+</head>
+<body>
+    <h1>🚀 Agora Signaling Backend Test</h1>
+    
+    <div class="test-section">
+        <h3>🔑 RTM Token Test (Signaling)</h3>
+        <input type="text" id="rtm-uid" placeholder="Enter User ID" value="testUser123">
+        <button onclick="testRtmToken()">Get RTM Token</button>
+        <div id="rtm-result" class="result"></div>
+    </div>
+    
+    <div class="test-section">
+        <h3>🎥 Media Token Test (Video/Audio)</h3>
+        <input type="text" id="media-channel" placeholder="Enter Channel Name" value="room1">
+        <input type="text" id="media-uid" placeholder="Enter User ID" value="testUser123">
+        <button onclick="testMediaToken()">Get Media Token</button>
+        <div id="media-result" class="result"></div>
+    </div>
+    
+    <div class="test-section">
+        <h3>⚠️ Error Handling Test</h3>
+        <button onclick="testErrorHandling()">Test Empty UID (Should Error)</button>
+        <div id="error-result" class="result"></div>
+    </div>
+
+    <script>
+        // Add debugging
+        console.log('JavaScript loaded');
+        
+        async function testRtmToken() {
+            console.log('Testing RTM token...');
+            const uid = document.getElementById('rtm-uid').value;
+            const resultDiv = document.getElementById('rtm-result');
+            
+            try {
+                console.log(`Making request to: /rtm-token?uid=${uid}`);
+                const response = await fetch(`/rtm-token?uid=${encodeURIComponent(uid)}`, {
+                    method: 'GET',
+                    headers: {
+                        'Accept': 'application/json',
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                console.log('Response status:', response.status);
+                console.log('Response headers:', response.headers);
+                
+                const data = await response.json();
+                console.log('Response data:', data);
+                
+                if (response.ok) {
+                    resultDiv.className = 'result success';
+                    resultDiv.innerHTML = `
+                        <strong>✅ RTM Token Generated!</strong><br>
+                        <strong>User ID:</strong> ${data.uid}<br>
+                        <strong>Token:</strong> <code>${data.token}</code>
+                    `;
+                } else {
+                    resultDiv.className = 'result error';
+                    resultDiv.innerHTML = `<strong>❌ Error:</strong> ${data.error}<br><strong>Message:</strong> ${data.message}`;
+                }
+            } catch (error) {
+                console.error('Fetch error:', error);
+                resultDiv.className = 'result error';
+                resultDiv.innerHTML = `<strong>❌ Network Error:</strong> ${error.message}<br><strong>Check console for details</strong>`;
+            }
+        }
+        
+        async function testMediaToken() {
+            const channelName = document.getElementById('media-channel').value;
+            const uid = document.getElementById('media-uid').value;
+            const resultDiv = document.getElementById('media-result');
+            
+            try {
+                const response = await fetch(`/media-token?channelName=${encodeURIComponent(channelName)}&uid=${encodeURIComponent(uid)}`);
+                const data = await response.json();
+                
+                if (response.ok) {
+                    resultDiv.className = 'result success';
+                    resultDiv.innerHTML = `
+                        <strong>✅ Media Token Generated!</strong><br>
+                        <strong>Channel:</strong> ${data.channelName}<br>
+                        <strong>User ID:</strong> ${data.uid}<br>
+                        <strong>Token:</strong> <code>${data.token}</code>
+                    `;
+                } else {
+                    resultDiv.className = 'result error';
+                    resultDiv.innerHTML = `<strong>❌ Error:</strong> ${data.error}<br><strong>Message:</strong> ${data.message}`;
+                }
+            } catch (error) {
+                resultDiv.className = 'result error';
+                resultDiv.innerHTML = `<strong>❌ Network Error:</strong> ${error.message}`;
+            }
+        }
+        
+        async function testErrorHandling() {
+            const resultDiv = document.getElementById('error-result');
+            
+            try {
+                const response = await fetch('/rtm-token?uid=');
+                const data = await response.json();
+                
+                resultDiv.className = 'result error';
+                resultDiv.innerHTML = `
+                    <strong>✅ Error Handling Working!</strong><br>
+                    <strong>Status:</strong> ${response.status}<br>
+                    <strong>Error:</strong> ${data.error}<br>
+                    <strong>Message:</strong> ${data.message}
+                `;
+            } catch (error) {
+                resultDiv.className = 'result error';
+                resultDiv.innerHTML = `<strong>❌ Network Error:</strong> ${error.message}`;
+            }
+        }
+    </script>
+</body>
+</html>
