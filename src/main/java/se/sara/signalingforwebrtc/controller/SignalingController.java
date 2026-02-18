@@ -7,8 +7,6 @@ import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.handler.annotation.SendTo;
 import org.springframework.messaging.handler.annotation.DestinationVariable;
-import se.sara.signalingforwebrtc.dto.TokenResponse;
-import se.sara.signalingforwebrtc.service.TokenService;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -19,24 +17,11 @@ import java.util.concurrent.ConcurrentHashMap;
 public class SignalingController {
     
     @Autowired
-    private TokenService tokenService;
-    
-    @Autowired
     private SimpMessagingTemplate messagingTemplate;
     
     // Store room participants
     private final Map<String, Set<String>> rooms = new ConcurrentHashMap<>();
     private final Map<String, String> userSessions = new ConcurrentHashMap<>();
-    
-    @GetMapping("/rtm-token")
-    public ResponseEntity<TokenResponse> getRtmToken(@RequestParam String uid) {
-        return tokenService.generateRtmToken(uid);
-    }
-    
-    @GetMapping("/media-token")
-    public ResponseEntity<TokenResponse> getMediaToken(@RequestParam String channelName, @RequestParam String uid) {
-        return tokenService.generateMediaToken(channelName, uid);
-    }
     
     // WebSocket message mapping for real-time signaling
     @MessageMapping("/signaling")
@@ -168,40 +153,6 @@ public class SignalingController {
             "rooms", roomInfo,
             "totalRooms", rooms.size()
         ));
-    }
-
-    // Chat message endpoint
-    @PostMapping("/chat")
-    public ResponseEntity<?> sendChatMessage(@RequestBody Map<String, Object> message) {
-        try {
-            String room = (String) message.get("room");
-            String username = (String) message.get("username");
-            String text = (String) message.get("message");
-            
-            if (room == null || username == null || text == null) {
-                return ResponseEntity.badRequest().body(Map.of("error", "Missing required fields"));
-            }
-            
-            // Create chat message
-            Map<String, Object> chatMessage = Map.of(
-                "type", "chat",
-                "username", username,
-                "message", text,
-                "room", room,
-                "timestamp", System.currentTimeMillis()
-            );
-            
-            // Broadcast to room
-            messagingTemplate.convertAndSend("/topic/signaling/" + room, (Object) chatMessage);
-            
-            return ResponseEntity.ok(Map.of("success", true));
-            
-        } catch (Exception e) {
-            return ResponseEntity.badRequest().body(Map.of(
-                "error", "Failed to send message",
-                "message", e.getMessage()
-            ));
-        }
     }
 
     // Get user's current room
