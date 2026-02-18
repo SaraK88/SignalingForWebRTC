@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Clean Friend Test - Pure WebRTC</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background: #f0f2f5; }
+        .container { max-width: 600px; margin: 0 auto; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .form-group { margin: 15px 0; }
+        input { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 5px; font-size: 16px; }
+        button { background: #007bff; color: white; padding: 12px 24px; border: none; border-radius: 5px; cursor: pointer; font-size: 16px; margin: 5px; }
+        button:hover { background: #0056b3; }
+        button:disabled { background: #ccc; cursor: not-allowed; }
+        .video-container { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 20px 0; }
+        .video-box { background: #000; height: 300px; border-radius: 10px; display: flex; align-items: center; justify-content: center; color: white; }
+        .video-box video { width: 100%; height: 100%; object-fit: cover; border-radius: 10px; }
+        .status { padding: 10px; border-radius: 5px; margin: 10px 0; text-align: center; }
+        .status.success { background: #d4edda; color: #155724; }
+        .status.error { background: #f8d7da; color: #721c24; }
+        .status.info { background: #d1ecf1; color: #0c5460; }
+        .ngrok-info { background: #fff3cd; padding: 15px; border-radius: 5px; margin: 20px 0; }
+        .ngrok-info h4 { color: #856404; margin-bottom: 10px; }
+        .ngrok-info code { background: #f8f9fa; padding: 10px; border-radius: 3px; display: block; font-family: monospace; font-size: 12px; }
+        .offer-section { background: #f8f9fa; padding: 15px; border-radius: 5px; margin: 15px 0; }
+        .offer-text { width: 100%; height: 80px; font-family: monospace; font-size: 10px; border: 1px solid #ddd; padding: 10px; border-radius: 5px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📞 Clean Friend Test - Pure WebRTC</h1>
+        
+        <!-- Ngrok Instructions -->
+        <div class="ngrok-info">
+            <h4>🌐 To Test with Friends:</h4>
+            <p>1. Run: <code>ngrok http 3000</code></p>
+            <p>2. Share the HTTPS URL with friends</p>
+            <p>3. Both use same room name</p>
+        </div>
+        
+        <!-- Join Form -->
+        <div class="form-group">
+            <label>Your Name:</label>
+            <input type="text" id="username" placeholder="Enter your name" value="Alice">
+        </div>
+        
+        <div class="form-group">
+            <label>Room Name:</label>
+            <input type="text" id="room" placeholder="Enter room name" value="video-room">
+        </div>
+        
+        <button onclick="joinRoom()">🚀 Join Room</button>
+        
+        <div id="status" class="status">Ready to join room</div>
+        
+        <!-- Offer Exchange -->
+        <div id="offer-section" class="offer-section" style="display: none;">
+            <h4>📤 Share Your Offer:</h4>
+            <textarea id="local-offer" class="offer-text" readonly placeholder="Your offer will appear here..."></textarea>
+            <button onclick="copyOffer()">Copy Offer</button>
+            
+            <h4>📥 Enter Remote Offer:</h4>
+            <textarea id="remote-offer" class="offer-text" placeholder="Paste offer from other user..."></textarea>
+            <button onclick="processOffer()">Process Offer</button>
+            <button onclick="startCall()" id="start-btn" style="background: #28a745;">📞 Start Call</button>
+        </div>
+        
+        <!-- Video Area -->
+        <div id="video-section" style="display: none;">
+            <div class="video-container">
+                <div>
+                    <h4>📹 You</h4>
+                    <div class="video-box">
+                        <video id="local-video" autoplay muted></video>
+                    </div>
+                </div>
+                <div>
+                    <h4>📹 Remote User</h4>
+                    <div class="video-box">
+                        <video id="remote-video" autoplay></video>
+                    </div>
+                </div>
+            </div>
+            
+            <div style="text-align: center; margin: 20px 0;">
+                <button onclick="endCall()">🚪 Leave Room</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        class CleanFriendCall {
+            constructor() {
+                this.username = '';
+                this.room = '';
+                this.localStream = null;
+                this.remoteStream = null;
+                this.offerPeer = null;
+                this.answerPeer = null;
+                
+                this.config = {
+                    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+                };
+            }
+            
+            updateStatus(message, type = 'info') {
+                const statusElement = document.getElementById('status');
+                statusElement.textContent = message;
+                statusElement.className = `status ${type}`;
+            }
+            
+            async joinRoom() {
+                try {
+                    this.username = document.getElementById('username').value.trim();
+                    this.room = document.getElementById('room').value.trim();
+                    
+                    if (!this.username || !this.room) {
+                        alert('Please enter username and room name');
+                        return;
+                    }
+                    
+                    this.updateStatus('Getting camera...', 'info');
+                    
+                    // Get local media
+                    this.localStream = await navigator.mediaDevices.getUserMedia({ 
+                        video: true, 
+                        audio: true 
+                    });
+                    
+                    document.getElementById('local-video').srcObject = this.localStream;
+                    
+                    // Show sections
+                    document.getElementById('offer-section').style.display = 'block';
+                    document.getElementById('video-section').style.display = 'block';
+                    
+                    // Create offer
+                    await this.createOffer();
+                    
+                    this.updateStatus(`🟢 Joined room: ${this.room}`, 'success');
+                    
+                } catch (error) {
+                    this.updateStatus(`❌ Error: ${error.message}`, 'error');
+                }
+            }
+            
+            async createOffer() {
+                try {
+                    this.offerPeer = new RTCPeerConnection(this.config);
+                    
+                    // Add local tracks
+                    this.localStream.getTracks().forEach(track => {
+                        this.offerPeer.addTrack(track, this.localStream);
+                    });
+                    
+                    // Handle remote stream
+                    this.offerPeer.ontrack = (event) => {
+                        this.remoteStream = event.streams[0];
+                        document.getElementById('remote-video').srcObject = this.remoteStream;
+                        this.updateStatus('🟢 Connected to remote user!', 'success');
+                    };
+                    
+                    // Create offer
+                    const offer = await this.offerPeer.createOffer();
+                    await this.offerPeer.setLocalDescription(offer);
+                    
+                    document.getElementById('local-offer').value = JSON.stringify(offer, null, 2);
+                    
+                } catch (error) {
+                    this.updateStatus(`Offer error: ${error.message}`, 'error');
+                }
+            }
+            
+            async processOffer() {
+                try {
+                    const offerText = document.getElementById('remote-offer').value.trim();
+                    if (!offerText) {
+                        this.updateStatus('❌ Please paste offer', 'error');
+                        return;
+                    }
+                    
+                    const offer = JSON.parse(offerText);
+                    
+                    this.answerPeer = new RTCPeerConnection(this.config);
+                    
+                    // Add local tracks
+                    this.localStream.getTracks().forEach(track => {
+                        this.answerPeer.addTrack(track, this.localStream);
+                    });
+                    
+                    // Handle remote stream
+                    this.answerPeer.ontrack = (event) => {
+                        this.remoteStream = event.streams[0];
+                        document.getElementById('remote-video').srcObject = this.remoteStream;
+                        this.updateStatus('🟢 Connected to remote user!', 'success');
+                    };
+                    
+                    // Set remote description
+                    await this.answerPeer.setRemoteDescription(offer);
+                    
+                    // Create answer
+                    const answer = await this.answerPeer.createAnswer();
+                    await this.answerPeer.setLocalDescription(answer);
+                    
+                    // Show answer for copying
+                    document.getElementById('local-offer').value = JSON.stringify(answer, null, 2);
+                    
+                    this.updateStatus('✅ Offer processed, answer created', 'success');
+                    
+                } catch (error) {
+                    this.updateStatus(`Process error: ${error.message}`, 'error');
+                }
+            }
+            
+            async startCall() {
+                try {
+                    // Exchange offers/answers
+                    if (this.offerPeer && this.answerPeer) {
+                        const answerText = document.getElementById('local-offer').value;
+                        if (answerText) {
+                            const answer = JSON.parse(answerText);
+                            await this.offerPeer.setRemoteDescription(answer);
+                        }
+                    }
+                    
+                    this.updateStatus('🟢 Call started!', 'success');
+                    
+                } catch (error) {
+                    this.updateStatus(`Start error: ${error.message}`, 'error');
+                }
+            }
+            
+            copyOffer() {
+                const offerText = document.getElementById('local-offer').value;
+                if (offerText) {
+                    navigator.clipboard.writeText(offerText).then(() => {
+                        this.updateStatus('✅ Copied to clipboard', 'success');
+                    });
+                }
+            }
+            
+            endCall() {
+                if (this.localStream) {
+                    this.localStream.getTracks().forEach(track => track.stop());
+                }
+                
+                if (this.offerPeer) {
+                    this.offerPeer.close();
+                }
+                
+                if (this.answerPeer) {
+                    this.answerPeer.close();
+                }
+                
+                document.getElementById('remote-video').srcObject = null;
+                document.getElementById('local-video').srcObject = null;
+                
+                this.updateStatus('Call ended', 'info');
+            }
+        }
+        
+        let app = null;
+        
+        window.addEventListener('load', () => {
+            app = new CleanFriendCall();
+        });
+        
+        function joinRoom() {
+            if (app) app.joinRoom();
+        }
+        
+        function processOffer() {
+            if (app) app.processOffer();
+        }
+        
+        function startCall() {
+            if (app) app.startCall();
+        }
+        
+        function copyOffer() {
+            if (app) app.copyOffer();
+        }
+        
+        function endCall() {
+            if (app) app.endCall();
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Button Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .btn { padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; font-size: 14px; margin: 10px; }
+        .btn-success { background: #28a745; color: white; }
+        .btn:disabled { background: #ccc; cursor: not-allowed; }
+        .btn.enabled { background: #28a745 !important; cursor: pointer !important; }
+    </style>
+</head>
+<body>
+    <h1>Button Test</h1>
+    
+    <button id="testBtn" class="btn btn-success" disabled>Test Button</button>
+    <button onclick="enableButton()" class="btn btn-primary">Enable Button</button>
+    <button onclick="disableButton()" class="btn btn-danger">Disable Button</button>
+    
+    <script>
+        function enableButton() {
+            console.log('=== ENABLING BUTTON ===');
+            const btn = document.getElementById('testBtn');
+            
+            console.log('Found button:', btn);
+            console.log('Current disabled state:', btn.disabled);
+            console.log('Current classes:', btn.className);
+            
+            // Remove disabled attribute
+            btn.removeAttribute('disabled');
+            btn.disabled = false;
+            btn.classList.add('enabled');
+            
+            console.log('New disabled state:', btn.disabled);
+            console.log('Has disabled attribute:', btn.hasAttribute('disabled'));
+            console.log('New classes:', btn.className);
+            console.log('=== BUTTON ENABLED ===');
+        }
+        
+        function disableButton() {
+            console.log('=== DISABLING BUTTON ===');
+            const btn = document.getElementById('testBtn');
+            btn.disabled = true;
+            btn.setAttribute('disabled', 'disabled');
+            btn.classList.remove('enabled');
+            console.log('Button disabled');
+        }
+    </script>
+</body>
+</html>

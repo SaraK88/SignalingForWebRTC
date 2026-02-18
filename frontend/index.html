@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agora WebRTC Video Call</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎥 Agora WebRTC Video Call</h1>
+            <div class="status" id="connection-status">🔴 Not Connected</div>
+        </header>
+
+        <main>
+            <!-- Join Room Section -->
+            <section class="join-section" id="join-section">
+                <h2>Join a Room</h2>
+                <div class="form-group">
+                    <label for="username">Your Name:</label>
+                    <input type="text" id="username" placeholder="Enter your name" value="User1">
+                </div>
+                <div class="form-group">
+                    <label for="room-name">Room Name:</label>
+                    <input type="text" id="room-name" placeholder="Enter room name" value="room1">
+                </div>
+                <button id="join-btn" onclick="joinRoom()">Join Room</button>
+            </section>
+
+            <!-- Video Call Section -->
+            <section class="video-section" id="video-section" style="display: none;">
+                <div class="video-container">
+                    <div class="video-wrapper">
+                        <h3>📹 Local Video</h3>
+                        <div id="local-video" class="video-box"></div>
+                        <button id="mute-btn" onclick="toggleMute()">🔊 Mute</button>
+                        <button id="video-btn" onclick="toggleVideo()">📹 Video On</button>
+                    </div>
+                    
+                    <div class="video-wrapper">
+                        <h3>📹 Remote Video</h3>
+                        <div id="remote-video" class="video-box"></div>
+                        <div class="remote-info" id="remote-info">Waiting for remote user...</div>
+                    </div>
+                </div>
+
+                <div class="controls">
+                    <button id="leave-btn" onclick="leaveRoom()">🚪 Leave Room</button>
+                    <button id="screen-share-btn" onclick="toggleScreenShare()">🖥️ Share Screen</button>
+                </div>
+
+                <div class="messages">
+                    <h3>💬 Messages</h3>
+                    <div id="message-list"></div>
+                    <div class="message-input">
+                        <input type="text" id="message-input" placeholder="Type a message...">
+                        <button onclick="sendMessage()">Send</button>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <footer>
+            <div class="logs">
+                <h3>📋 Logs</h3>
+                <div id="logs"></div>
+            </div>
+        </footer>
+    </div>
+
+    <!-- Agora Web SDK - Updated CDN links -->
+    <script src="https://download.agora.io/sdk/release/web/AgoraRTC_N-4.20.1.js"></script>
+    <script src="https://download.agora.io/sdk/release/web/AgoraRTM-2.1.3.js"></script>
+    
+    <!-- Fallback if CDN fails -->
+    <script>
+        // Check if Agora SDKs loaded properly
+        window.addEventListener('load', function() {
+            if (typeof AgoraRTC === 'undefined') {
+                console.error('AgoraRTC SDK failed to load');
+                alert('Failed to load AgoraRTC SDK. Please check your internet connection.');
+            }
+            if (typeof AgoraRTM === 'undefined') {
+                console.error('AgoraRTM SDK failed to load');
+                alert('Failed to load AgoraRTM SDK. Please check your internet connection.');
+            }
+        });
+    </script>
+    <script src="app.js"></script>
+</body>
+</html>

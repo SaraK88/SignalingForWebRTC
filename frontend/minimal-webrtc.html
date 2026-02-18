@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Minimal WebRTC</title>
+    <style>
+        body { margin: 20px; font-family: Arial; }
+        .container { max-width: 800px; margin: 0 auto; }
+        .videos { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 20px 0; }
+        .video-box { background: #000; aspect-ratio: 16/9; }
+        video { width: 100%; height: 100%; }
+        .controls { text-align: center; padding: 20px; background: #f8f9fa; }
+        .btn { padding: 12px 20px; margin: 5px; border: none; border-radius: 5px; cursor: pointer; }
+        .btn-success { background: #28a745; color: white; }
+        .btn-danger { background: #dc3545; color: white; }
+        .btn-primary { background: #007bff; color: white; }
+        .btn-warning { background: #ffc107; color: black; }
+        .status { text-align: center; padding: 10px; }
+        .inputs { text-align: center; padding: 20px; }
+        .inputs input { padding: 8px; margin: 5px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="inputs">
+            <input type="text" id="username" value="User1">
+            <input type="text" id="room" value="main-room">
+            <button class="btn btn-success" onclick="connect()">Connect</button>
+        </div>
+        
+        <div class="status" id="status">Not Connected</div>
+        
+        <div class="videos">
+            <div class="video-box">
+                <video id="localVideo" autoplay muted></video>
+            </div>
+            <div class="video-box">
+                <video id="remoteVideo" autoplay></video>
+            </div>
+        </div>
+        
+        <div class="controls">
+            <button class="btn btn-success" id="startCallBtn" onclick="console.log('Button clicked!'); startCall()">Start Call</button>
+            <button class="btn btn-danger" id="endCallBtn" onclick="endCall()" disabled>End Call</button>
+            <button class="btn btn-warning" id="answerCallBtn" onclick="answerCall()" style="display:none;">Answer Call</button>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1.6.1/dist/sockjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
+    <script>
+        let app = {
+            username: '',
+            room: '',
+            localStream: null,
+            peerConnection: null,
+            stompClient: null,
+            isInCall: false,
+            backendUrl: 'http://localhost:8081'
+        };
+
+        function updateStatus(text) {
+            document.getElementById('status').textContent = text;
+        }
+
+        function connect() {
+            app.username = document.getElementById('username').value;
+            app.room = document.getElementById('room').value;
+            
+            updateStatus('Connecting...');
+            
+            navigator.mediaDevices.getUserMedia({video: true, audio: true})
+                .then(stream => {
+                    app.localStream = stream;
+                    document.getElementById('localVideo').srcObject = stream;
+                    
+                    const socket = new SockJS(app.backendUrl + '/ws');
+                    app.stompClient = Stomp.over(socket);
+                    
+                    app.stompClient.connect({}, () => {
+                        updateStatus('Connected');
+                        document.getElementById('startCallBtn').disabled = false;
+                        
+                        fetch(app.backendUrl + '/api/v1/signaling/rooms/' + app.room + '/join', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({username: app.username})
+                        });
+                        
+                        app.stompClient.subscribe('/topic/signaling/' + app.room, (msg) => {
+                            const data = JSON.parse(msg.body);
+                            handleSignaling(data);
+                        });
+                    });
+                });
+        }
+
+        async function sendSignalingMessage(message) {
+            try {
+                console.log('Sending via HTTP fallback:', message);
+                const response = await fetch(`${app.backendUrl}/api/v1/signaling/signaling`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(message)
+                });
+                
+                if (!response.ok) {
+                    throw new Error('HTTP signaling failed');
+                }
+                
+                console.log('HTTP signaling response:', response);
+                
+            } catch (error) {
+                console.error('Send signaling error:', error);
+            }
+        }
+
+        function startCall() {
+            console.log('=== START CALL ===');
+            console.log('app.localStream:', app.localStream);
+            
+            if (!app.localStream) {
+                console.error('No local stream available!');
+                updateStatus('Error: No camera/mic');
+                return;
+            }
+            
+            // Check if there's already an active call in the room
+            if (app.isInCall) {
+                console.log('Already in a call, cannot start another');
+                updateStatus('Already in a call');
+                return;
+            }
+            
+            updateStatus('Starting call...');
+            
+            app.peerConnection = new RTCPeerConnection({
+                iceServers: [{urls: 'stun:stun.l.google.com:19302'}]
+            });
+            
+            app.localStream.getTracks().forEach(track => {
+                app.peerConnection.addTrack(track, app.localStream);
+            });
+            
+            app.peerConnection.ontrack = (e) => {
+                document.getElementById('remoteVideo').srcObject = e.streams[0];
+                updateStatus('Connected');
+            };
+            
+            // Handle ICE candidates
+            app.peerConnection.onicecandidate = (event) => {
+                if (event.candidate) {
+                    console.log('Sending ICE candidate:', event.candidate);
+                    sendSignalingMessage({
+                        type: 'ice-candidate',
+                        candidate: event.candidate,
+                        from: app.username,
+                        room: app.room
+                    });
+                }
+            };
+            
+            app.peerConnection.createOffer()
+                .then(offer => app.peerConnection.setLocalDescription(offer))
+                .then(() => {
+                    sendSignalingMessage({
+                        type: 'offer',
+                        offer: app.peerConnection.localDescription,
+                        from: app.username,
+                        room: app.room
+                    });
+                    // Set isInCall only after offer is sent
+                    app.isInCall = true;
+                    updateStatus('Calling...');
+                    // Enable end call button
+                    document.getElementById('endCallBtn').disabled = false;
+                });
+        }
+
+        function answerCall() {
+            console.log('=== ANSWER CALL START ===');
+            console.log('app.pendingOffer:', app.pendingOffer);
+            
+            app.isInCall = true;
+            
+            // Enable end call button
+            document.getElementById('endCallBtn').disabled = false;
+            
+            app.peerConnection = new RTCPeerConnection({
+                iceServers: [{urls: 'stun:stun.l.google.com:19302'}]
+            });
+            
+            app.localStream.getTracks().forEach(track => {
+                app.peerConnection.addTrack(track, app.localStream);
+            });
+            
+            app.peerConnection.ontrack = (e) => {
+                document.getElementById('remoteVideo').srcObject = e.streams[0];
+                updateStatus('Connected');
+            };
+            
+            // Handle ICE candidates
+            app.peerConnection.onicecandidate = (event) => {
+                if (event.candidate) {
+                    console.log('Sending ICE candidate:', event.candidate);
+                    sendSignalingMessage({
+                        type: 'ice-candidate',
+                        candidate: event.candidate,
+                        from: app.username,
+                        room: app.room
+                    });
+                }
+            };
+            
+            // Set remote offer FIRST, then create answer
+            console.log('Setting remote offer...');
+            app.peerConnection.setRemoteDescription(app.pendingOffer)
+                .then(() => {
+                    console.log('Remote offer set, creating answer...');
+                    return app.peerConnection.createAnswer();
+                })
+                .then(answer => {
+                    console.log('Answer created, setting local description...');
+                    return app.peerConnection.setLocalDescription(answer);
+                })
+                .then(() => {
+                    console.log('Sending answer...');
+                    sendSignalingMessage({
+                        type: 'answer',
+                        answer: app.peerConnection.localDescription,
+                        from: app.username,
+                        room: app.room
+                    });
+                    console.log('=== ANSWER CALL END ===');
+                })
+                .catch(error => {
+                    console.error('Answer call error:', error);
+                });
+        }
+
+        function endCall() {
+            console.log('=== END CALL ===');
+            
+            // Notify other user that call is ending
+            sendSignalingMessage({
+                type: 'call-ended',
+                from: app.username,
+                room: app.room
+            });
+            
+            // Reset call state
+            app.isInCall = false;
+            app.isInitiator = false;
+            app.pendingOffer = null;
+            
+            // Close peer connection
+            if (app.peerConnection) {
+                app.peerConnection.close();
+                app.peerConnection = null;
+            }
+            
+            // Clear remote video
+            document.getElementById('remoteVideo').srcObject = null;
+            
+            // Hide answer button if visible
+            const answerBtn = document.getElementById('answerCallBtn');
+            if (answerBtn) {
+                answerBtn.style.display = 'none';
+            }
+            
+            // Update status
+            updateStatus('Connected');
+            
+            // Disable end call button
+            document.getElementById('endCallBtn').disabled = true;
+            
+            console.log('=== END CALL COMPLETE ===');
+        }
+
+        function handleSignaling(data) {
+            console.log('=== HANDLE SIGNALING ===');
+            console.log('Received data:', data);
+            console.log('data.type:', data.type);
+            console.log('app.isInCall:', app.isInCall);
+            
+            if (data.type === 'offer' && !app.isInCall) {
+                console.log('Processing offer...');
+                // Reset isInCall to false since we're receiving an offer
+                app.isInCall = false;
+                app.pendingOffer = data.offer;
+                const answerBtn = document.getElementById('answerCallBtn');
+                console.log('Answer button found:', answerBtn);
+                answerBtn.style.display = 'inline-block';
+                console.log('Answer button should now be visible');
+            } else if (data.type === 'answer' && app.isInCall) {
+                console.log('Processing answer...');
+                app.peerConnection.setRemoteDescription(data.answer);
+            } else if (data.type === 'ice-candidate' && app.peerConnection) {
+                console.log('Processing ICE candidate:', data.candidate);
+                app.peerConnection.addIceCandidate(data.candidate)
+                    .then(() => console.log('ICE candidate added successfully'))
+                    .catch(error => console.error('Error adding ICE candidate:', error));
+            } else if (data.type === 'call-ended') {
+                console.log('Call ended by:', data.from);
+                // Both users should end the call
+                if (app.isInCall) {
+                    endCall();
+                }
+            }
+            
+            console.log('=== HANDLE SIGNALING END ===');
+        }
+    </script>
+</body>
+</html>

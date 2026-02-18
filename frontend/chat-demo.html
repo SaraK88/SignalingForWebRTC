@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real WebRTC Chat Demo</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background: #f0f2f5; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .user-section { 
+            display: inline-block; 
+            width: 45%; 
+            margin: 10px; 
+            padding: 20px; 
+            background: white; 
+            border-radius: 10px; 
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            vertical-align: top;
+        }
+        .video-box { 
+            background: #000; 
+            height: 200px; 
+            border-radius: 10px; 
+            display: flex; 
+            align-items: center; 
+            justify-content: center; 
+            color: white; 
+            margin: 10px 0;
+        }
+        .video-box video { width: 100%; height: 100%; object-fit: cover; border-radius: 10px; }
+        button { background: #007bff; color: white; padding: 8px 16px; border: none; border-radius: 5px; cursor: pointer; margin: 5px; }
+        button:hover { background: #0056b3; }
+        button:disabled { background: #ccc; cursor: not-allowed; }
+        .chat { background: #f8f9fa; padding: 10px; border-radius: 5px; height: 150px; overflow-y: auto; margin: 10px 0; }
+        .message { margin: 5px 0; padding: 5px; border-radius: 3px; font-size: 12px; }
+        .message.alice { background: #e3f2fd; text-align: right; }
+        .message.bob { background: #f3e5f5; }
+        .status { padding: 5px; border-radius: 3px; margin: 5px 0; font-size: 12px; }
+        .status.success { background: #d4edda; color: #155724; }
+        .status.error { background: #f8d7da; color: #721c24; }
+        .status.info { background: #d1ecf1; color: #0c5460; }
+        .controls { margin: 10px 0; }
+        .auto-connect { background: #28a745; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>💬 Real WebRTC Chat & Video Demo</h1>
+        <button class="auto-connect" onclick="autoConnect()">🚀 Auto Connect Both Users</button>
+        
+        <!-- Alice Section -->
+        <div class="user-section">
+            <h3>👤 Alice</h3>
+            <div class="video-box">
+                <video id="alice-local" autoplay muted></video>
+            </div>
+            <div class="video-box">
+                <video id="alice-remote" autoplay></video>
+            </div>
+            <div class="controls">
+                <button onclick="toggleAliceMute()">🔊 Mute</button>
+                <button onclick="toggleAliceVideo()">📹 Video</button>
+            </div>
+            <div class="chat" id="alice-chat"></div>
+            <div>
+                <input type="text" id="alice-input" placeholder="Type message..." onkeypress="if(event.key==='Enter') sendAliceMessage()">
+                <button onclick="sendAliceMessage()">Send</button>
+            </div>
+            <div id="alice-status" class="status info">Ready</div>
+        </div>
+        
+        <!-- Bob Section -->
+        <div class="user-section">
+            <h3>👤 Bob</h3>
+            <div class="video-box">
+                <video id="bob-local" autoplay muted></video>
+            </div>
+            <div class="video-box">
+                <video id="bob-remote" autoplay></video>
+            </div>
+            <div class="controls">
+                <button onclick="toggleBobMute()">🔊 Mute</button>
+                <button onclick="toggleBobVideo()">📹 Video</button>
+            </div>
+            <div class="chat" id="bob-chat"></div>
+            <div>
+                <input type="text" id="bob-input" placeholder="Type message..." onkeypress="if(event.key==='Enter') sendBobMessage()">
+                <button onclick="sendBobMessage()">Send</button>
+            </div>
+            <div id="bob-status" class="status info">Ready</div>
+        </div>
+    </div>
+
+    <script>
+        class WebRTCUser {
+            constructor(name, localVideoId, remoteVideoId, chatId, statusId, inputId) {
+                this.name = name;
+                this.localVideoElement = document.getElementById(localVideoId);
+                this.remoteVideoElement = document.getElementById(remoteVideoId);
+                this.chatElement = document.getElementById(chatId);
+                this.statusElement = document.getElementById(statusId);
+                this.inputElement = document.getElementById(inputId);
+                
+                this.localStream = null;
+                this.peerConnection = null;
+                this.otherUser = null;
+                
+                this.config = {
+                    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+                };
+            }
+            
+            updateStatus(message, type = 'info') {
+                this.statusElement.textContent = message;
+                this.statusElement.className = `status ${type}`;
+            }
+            
+            async initialize() {
+                try {
+                    this.updateStatus('Getting camera...', 'info');
+                    
+                    const constraints = {
+                        video: { width: 320, height: 240 },
+                        audio: true
+                    };
+                    
+                    this.localStream = await navigator.mediaDevices.getUserMedia(constraints);
+                    this.localVideoElement.srcObject = this.localStream;
+                    
+                    await this.createPeerConnection();
+                    this.updateStatus('Ready to connect', 'success');
+                    
+                } catch (error) {
+                    this.updateStatus(`Error: ${error.message}`, 'error');
+                }
+            }
+            
+            async createPeerConnection() {
+                this.peerConnection = new RTCPeerConnection(this.config);
+                
+                this.localStream.getTracks().forEach(track => {
+                    this.peerConnection.addTrack(track, this.localStream);
+                });
+                
+                this.peerConnection.ontrack = (event) => {
+                    this.remoteVideoElement.srcObject = event.streams[0];
+                    this.updateStatus('🟢 Connected!', 'success');
+                };
+                
+                this.peerConnection.onicecandidate = (event) => {
+                    if (event.candidate && this.otherUser) {
+                        this.otherUser.handleIceCandidate(event.candidate);
+                    }
+                };
+            }
+            
+            async connectTo(otherUser) {
+                this.otherUser = otherUser;
+                
+                const offer = await this.peerConnection.createOffer();
+                await this.peerConnection.setLocalDescription(offer);
+                
+                await otherUser.handleOffer(offer);
+            }
+            
+            async handleOffer(offer) {
+                this.otherUser = this;
+                await this.peerConnection.setRemoteDescription(offer);
+                
+                const answer = await this.peerConnection.createAnswer();
+                await this.peerConnection.setLocalDescription(answer);
+                
+                return answer;
+            }
+            
+            async handleAnswer(answer) {
+                await this.peerConnection.setRemoteDescription(answer);
+            }
+            
+            handleIceCandidate(candidate) {
+                this.peerConnection.addIceCandidate(candidate).catch(e => console.log('ICE candidate error:', e));
+            }
+            
+            addMessage(text, sender) {
+                const messageDiv = document.createElement('div');
+                messageDiv.className = `message ${sender}`;
+                messageDiv.textContent = text;
+                this.chatElement.appendChild(messageDiv);
+                this.chatElement.scrollTop = this.chatElement.scrollHeight;
+            }
+            
+            sendMessage(text) {
+                if (this.otherUser) {
+                    this.addMessage(text, 'own');
+                    this.otherUser.addMessage(text, this.name.toLowerCase());
+                }
+            }
+            
+            toggleMute() {
+                if (this.localStream) {
+                    const audioTrack = this.localStream.getAudioTracks()[0];
+                    audioTrack.enabled = !audioTrack.enabled;
+                    this.updateStatus(`Mic ${audioTrack.enabled ? 'on' : 'off'}`, 'info');
+                }
+            }
+            
+            toggleVideo() {
+                if (this.localStream) {
+                    const videoTrack = this.localStream.getVideoTracks()[0];
+                    videoTrack.enabled = !videoTrack.enabled;
+                    this.updateStatus(`Camera ${videoTrack.enabled ? 'on' : 'off'}`, 'info');
+                }
+            }
+        }
+        
+        let alice, bob;
+        
+        window.addEventListener('load', async () => {
+            alice = new WebRTCUser('Alice', 'alice-local', 'alice-remote', 'alice-chat', 'alice-status', 'alice-input');
+            bob = new WebRTCUser('Bob', 'bob-local', 'bob-remote', 'bob-chat', 'bob-status', 'bob-input');
+            
+            await alice.initialize();
+            await bob.initialize();
+        });
+        
+        async function autoConnect() {
+            if (!alice || !bob) {
+                alert('Please wait for users to initialize');
+                return;
+            }
+            
+            alice.updateStatus('Connecting to Bob...', 'info');
+            bob.updateStatus('Waiting for Alice...', 'info');
+            
+            await alice.connectTo(bob);
+            
+            alice.addMessage('Hi Bob! This is Alice!', 'alice');
+            bob.addMessage('Hi Alice! This is Bob!', 'bob');
+        }
+        
+        function sendAliceMessage() {
+            const text = alice.inputElement.value.trim();
+            if (text) {
+                alice.sendMessage(text);
+                alice.inputElement.value = '';
+            }
+        }
+        
+        function sendBobMessage() {
+            const text = bob.inputElement.value.trim();
+            if (text) {
+                bob.sendMessage(text);
+                bob.inputElement.value = '';
+            }
+        }
+        
+        function toggleAliceMute() { alice.toggleMute(); }
+        function toggleAliceVideo() { alice.toggleVideo(); }
+        function toggleBobMute() { bob.toggleMute(); }
+        function toggleBobVideo() { bob.toggleVideo(); }
+    </script>
+</body>
+</html>

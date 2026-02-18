@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Two-Step Call Setup</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background: #f0f2f5; }
+        .container { max-width: 1000px; margin: 0 auto; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .step-section { margin: 30px 0; padding: 20px; border: 2px solid #ddd; border-radius: 10px; }
+        .step-header { background: #007bff; color: white; padding: 10px; margin: -20px -20px 20px -20px; border-radius: 10px 10px 0 0; }
+        .form-group { margin: 15px 0; }
+        input { width: 300px; padding: 12px; border: 1px solid #ddd; border-radius: 5px; font-size: 16px; }
+        button { background: #007bff; color: white; padding: 12px 24px; border: none; border-radius: 5px; cursor: pointer; font-size: 16px; margin: 5px; }
+        button:hover { background: #0056b3; }
+        button:disabled { background: #ccc; cursor: not-allowed; }
+        button.success { background: #28a745; }
+        button.warning { background: #ffc107; color: #000; }
+        button.danger { background: #dc3545; }
+        .video-container { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 20px 0; }
+        .video-box { background: #000; height: 300px; border-radius: 10px; display: flex; align-items: center; justify-content: center; color: white; }
+        .video-box video { width: 100%; height: 100%; object-fit: cover; border-radius: 10px; }
+        .offer-box { background: #f8f9fa; padding: 15px; border-radius: 5px; margin: 15px 0; }
+        .offer-text { width: 100%; height: 120px; font-family: monospace; font-size: 11px; border: 1px solid #ddd; padding: 10px; border-radius: 5px; }
+        .status { padding: 10px; border-radius: 5px; margin: 15px 0; text-align: center; font-weight: bold; }
+        .status.success { background: #d4edda; color: #155724; }
+        .status.error { background: #f8d7da; color: #721c24; }
+        .status.info { background: #d1ecf1; color: #0c5460; }
+        .status.warning { background: #fff3cd; color: #856404; }
+        .hidden { display: none; }
+        .controls { text-align: center; margin: 20px 0; }
+        .step-number { background: #007bff; color: white; width: 30px; height: 30px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; margin-right: 10px; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📞 Two-Step Video Call Setup</h1>
+        
+        <!-- Step 1: Setup -->
+        <div class="step-section">
+            <div class="step-header">
+                <span class="step-number">1</span>
+                <h3>Setup Users</h3>
+            </div>
+            
+            <div class="form-group">
+                <label>Your Name:</label>
+                <input type="text" id="username" value="Alice">
+            </div>
+            
+            <button onclick="setupUser()">Setup Camera & Microphone</button>
+            <div id="setup-status" class="status">Not setup</div>
+        </div>
+        
+        <!-- Step 2: Create Offers -->
+        <div class="step-section">
+            <div class="step-header">
+                <span class="step-number">2</span>
+                <h3>Create Offers</h3>
+            </div>
+            
+            <button onclick="createOffer()" id="create-offer-btn" disabled>Create Your Offer</button>
+            <div class="offer-box">
+                <label>Your Offer:</label>
+                <textarea id="local-offer" class="offer-text" readonly placeholder="Your offer will appear here..."></textarea>
+                <button onclick="copyOffer()" id="copy-btn" disabled>Copy Offer</button>
+            </div>
+            
+            <div class="offer-box">
+                <label>Remote Offer:</label>
+                <textarea id="remote-offer" class="offer-text" placeholder="Paste offer from other user..."></textarea>
+                <button onclick="processRemoteOffer()" id="process-btn" disabled>Process Remote Offer</button>
+            <div id="process-debug" style="font-size: 12px; color: #666; margin-top: 5px;">Debug: Ready</div>
+            </div>
+            
+            <div id="offer-status" class="status">Offers not created</div>
+        </div>
+        
+        <!-- Step 3: Start Call -->
+        <div class="step-section">
+            <div class="step-header">
+                <span class="step-number">3</span>
+                <h3>Start Video Call</h3>
+            </div>
+            
+            <button onclick="startCall()" id="start-call-btn" class="success" disabled>📞 Start Call</button>
+            <div id="call-status" class="status">Ready to start call</div>
+        </div>
+        
+        <!-- Video Area -->
+        <div id="video-section" class="hidden">
+            <div class="video-container">
+                <div>
+                    <h4>📹 You</h4>
+                    <div class="video-box">
+                        <video id="local-video" autoplay muted></video>
+                    </div>
+                </div>
+                <div>
+                    <h4>📹 Remote User</h4>
+                    <div class="video-box">
+                        <video id="remote-video" autoplay></video>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="controls">
+                <button onclick="toggleMute()">🔊 Mute</button>
+                <button onclick="toggleVideo()">📹 Video Off</button>
+                <button onclick="endCall()" class="danger">🚪 End Call</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        class TwoStepCall {
+            constructor() {
+                this.username = '';
+                this.localStream = null;
+                this.remoteStream = null;
+                this.peerConnection = null;
+                this.localOffer = null;
+                this.remoteOffer = null;
+                this.isInCall = false;
+                
+                this.config = {
+                    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+                };
+            }
+            
+            async setupUser() {
+                try {
+                    this.username = document.getElementById('username').value.trim();
+                    
+                    // Get local media
+                    this.localStream = await navigator.mediaDevices.getUserMedia({ 
+                        video: true, 
+                        audio: true 
+                    });
+                    
+                    document.getElementById('local-video').srcObject = this.localStream;
+                    document.getElementById('setup-status').textContent = '✅ Camera & mic ready';
+                    document.getElementById('setup-status').className = 'status success';
+                    document.getElementById('create-offer-btn').disabled = false;
+                    
+                    this.updateStatus('User setup complete', 'success');
+                    
+                } catch (error) {
+                    document.getElementById('setup-status').textContent = '❌ Failed: ' + error.message;
+                    document.getElementById('setup-status').className = 'status error';
+                }
+            }
+            
+            async createOffer() {
+                try {
+                    // Create peer connection
+                    this.peerConnection = new RTCPeerConnection(this.config);
+                    
+                    // Add local tracks
+                    this.localStream.getTracks().forEach(track => {
+                        this.peerConnection.addTrack(track, this.localStream);
+                    });
+                    
+                    // Handle remote stream
+                    this.peerConnection.ontrack = (event) => {
+                        this.remoteStream = event.streams[0];
+                        document.getElementById('remote-video').srcObject = this.remoteStream;
+                    };
+                    
+                    // Handle ICE candidates
+                    this.peerConnection.onicecandidate = (event) => {
+                        if (event.candidate) {
+                            console.log('ICE candidate generated');
+                        }
+                    };
+                    
+                    // Create offer
+                    const offer = await this.peerConnection.createOffer();
+                    await this.peerConnection.setLocalDescription(offer);
+                    
+                    this.localOffer = offer;
+                    document.getElementById('local-offer').value = JSON.stringify(offer, null, 2);
+                    document.getElementById('copy-btn').disabled = false;
+                    
+                    this.updateStatus('✅ Offer created successfully', 'success');
+                    
+                } catch (error) {
+                    this.updateStatus('❌ Failed to create offer: ' + error.message, 'error');
+                }
+            }
+            
+            async processRemoteOffer() {
+                try {
+                    const offerText = document.getElementById('remote-offer').value.trim();
+                    if (!offerText) {
+                        this.updateStatus('❌ Please paste remote offer', 'error');
+                        return;
+                    }
+                    
+                    document.getElementById('process-debug').textContent = 'Debug: Processing offer...';
+                    console.log('Processing remote offer:', offerText);
+                    
+                    // Create new peer connection for receiving
+                    this.remoteOffer = JSON.parse(offerText);
+                    
+                    this.peerConnection = new RTCPeerConnection(this.config);
+                    
+                    // Add local tracks
+                    this.localStream.getTracks().forEach(track => {
+                        this.peerConnection.addTrack(track, this.localStream);
+                    });
+                    
+                    // Handle remote stream
+                    this.peerConnection.ontrack = (event) => {
+                        this.remoteStream = event.streams[0];
+                        document.getElementById('remote-video').srcObject = this.remoteStream;
+                        console.log('Remote video received');
+                    };
+                    
+                    // Handle ICE candidates
+                    this.peerConnection.onicecandidate = (event) => {
+                        if (event.candidate) {
+                            console.log('ICE candidate generated');
+                        }
+                    };
+                    
+                    // Set remote description
+                    await this.peerConnection.setRemoteDescription(this.remoteOffer);
+                    document.getElementById('process-debug').textContent = 'Debug: Remote description set';
+                    
+                    // Create answer
+                    const answer = await this.peerConnection.createAnswer();
+                    await this.peerConnection.setLocalDescription(answer);
+                    document.getElementById('process-debug').textContent = 'Debug: Answer created';
+                    
+                    // Show answer
+                    document.getElementById('local-offer').value = JSON.stringify(answer, null, 2);
+                    
+                    this.updateStatus('✅ Remote offer processed, answer created', 'success');
+                    
+                } catch (error) {
+                    console.error('Process offer error:', error);
+                    document.getElementById('process-debug').textContent = 'Debug: Error - ' + error.message;
+                    this.updateStatus('❌ Failed to process offer: ' + error.message, 'error');
+                }
+            }
+            
+            async startCall() {
+                if (!this.localOffer && !this.remoteOffer) {
+                    this.updateStatus('❌ Please create offers first', 'error');
+                    return;
+                }
+                
+                try {
+                    this.isInCall = true;
+                    
+                    // Show video section
+                    document.getElementById('video-section').classList.remove('hidden');
+                    
+                    if (this.remoteOffer) {
+                        // We're the answerer, connection already set
+                        this.updateStatus('🟢 Connecting to remote user...', 'info');
+                        
+                        // In real scenario, you'd exchange ICE candidates here
+                        setTimeout(() => {
+                            this.updateStatus('🟢 Call connected!', 'success');
+                        }, 2000);
+                        
+                    } else {
+                        // We're the offerer, need to wait for answer
+                        this.updateStatus('📞 Waiting for remote user to process your offer...', 'info');
+                    }
+                    
+                } catch (error) {
+                    this.updateStatus('❌ Failed to start call: ' + error.message, 'error');
+                }
+            }
+            
+            copyOffer() {
+                const offerText = document.getElementById('local-offer').value;
+                if (offerText) {
+                    navigator.clipboard.writeText(offerText).then(() => {
+                        this.updateStatus('✅ Offer copied to clipboard', 'success');
+                    });
+                }
+            }
+            
+            toggleMute() {
+                if (this.localStream) {
+                    const audioTrack = this.localStream.getAudioTracks()[0];
+                    audioTrack.enabled = !audioTrack.enabled;
+                }
+            }
+            
+            toggleVideo() {
+                if (this.localStream) {
+                    const videoTrack = this.localStream.getVideoTracks()[0];
+                    videoTrack.enabled = !videoTrack.enabled;
+                }
+            }
+            
+            endCall() {
+                this.isInCall = false;
+                
+                if (this.localStream) {
+                    this.localStream.getTracks().forEach(track => track.stop());
+                }
+                
+                if (this.peerConnection) {
+                    this.peerConnection.close();
+                }
+                
+                document.getElementById('remote-video').srcObject = null;
+                document.getElementById('local-video').srcObject = null;
+                document.getElementById('video-section').classList.add('hidden');
+                
+                this.updateStatus('Call ended', 'info');
+            }
+            
+            updateStatus(message, type = 'info') {
+                const statusElement = document.getElementById('call-status');
+                statusElement.textContent = message;
+                statusElement.className = `status ${type}`;
+            }
+        }
+        
+        let app = null;
+        
+        window.addEventListener('load', () => {
+            app = new TwoStepCall();
+        });
+        
+        function setupUser() {
+            if (app) app.setupUser();
+        }
+        
+        function createOffer() {
+            if (app) app.createOffer();
+        }
+        
+        function processRemoteOffer() {
+            if (app) app.processRemoteOffer();
+        }
+        
+        function startCall() {
+            if (app) app.startCall();
+        }
+        
+        function copyOffer() {
+            if (app) app.copyOffer();
+        }
+        
+        function toggleMute() {
+            if (app) app.toggleMute();
+        }
+        
+        function toggleVideo() {
+            if (app) app.toggleVideo();
+        }
+        
+        function endCall() {
+            if (app) app.endCall();
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebRTC P2P Demo (No External Dependencies)</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background: #f0f2f5; }
+        .container { max-width: 1000px; margin: 0 auto; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        input { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 5px; }
+        button { background: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; margin: 5px; }
+        button:hover { background: #0056b3; }
+        button:disabled { background: #ccc; cursor: not-allowed; }
+        .video-container { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 20px 0; }
+        .video-box { background: #000; height: 300px; border-radius: 10px; display: flex; align-items: center; justify-content: center; color: white; position: relative; }
+        .video-box video { width: 100%; height: 100%; object-fit: cover; border-radius: 10px; }
+        .status { padding: 10px; border-radius: 5px; margin: 10px 0; }
+        .status.success { background: #d4edda; color: #155724; }
+        .status.error { background: #f8d7da; color: #721c24; }
+        .status.info { background: #d1ecf1; color: #0c5460; }
+        .status.warning { background: #fff3cd; color: #856404; }
+        .logs { background: #f8f9fa; padding: 15px; border-radius: 5px; height: 200px; overflow-y: auto; font-family: monospace; font-size: 12px; }
+        .hidden { display: none; }
+        .offer-section { background: #e9ecef; padding: 15px; border-radius: 5px; margin: 10px 0; }
+        .offer-text { width: 100%; height: 100px; font-family: monospace; font-size: 12px; }
+        .chat { background: #f8f9fa; padding: 15px; border-radius: 5px; height: 150px; overflow-y: auto; margin: 10px 0; }
+        .message { margin: 5px 0; padding: 5px; border-radius: 3px; }
+        .message.local { background: #d1ecf1; text-align: right; }
+        .message.remote { background: #d4edda; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎥 WebRTC P2P Video Call (Using Your Backend)</h1>
+        
+        <div id="status" class="status info">Ready to start video call...</div>
+        
+        <!-- Token Test Section -->
+        <div id="token-section">
+            <h3>🔑 Test Your Backend Tokens</h3>
+            <div class="form-group">
+                <label for="test-uid">Test UID:</label>
+                <input type="text" id="test-uid" value="testUser123" placeholder="Enter test UID">
+            </div>
+            <button onclick="testTokens()">Test Backend Tokens</button>
+            <div id="token-result"></div>
+        </div>
+        
+        <!-- Join Section -->
+        <div id="join-section">
+            <h3>🚀 Start Video Call</h3>
+            <div class="form-group">
+                <label for="username">Your Name:</label>
+                <input type="text" id="username" value="User1" placeholder="Enter your name">
+            </div>
+            <div class="form-group">
+                <label for="room">Room Name:</label>
+                <input type="text" id="room" value="testroom" placeholder="Enter room name">
+            </div>
+            <button id="start-btn" onclick="startCall()">Start Call (Create Offer)</button>
+            <button id="join-btn" onclick="showJoinSection()">Join Call (Enter Offer)</button>
+        </div>
+        
+        <!-- Join with Offer Section -->
+        <div id="offer-section" class="hidden">
+            <h3>📞 Join Call with Offer</h3>
+            <div class="offer-section">
+                <label for="offer-input">Paste Offer Here:</label>
+                <textarea id="offer-input" class="offer-text" placeholder="Paste the offer from the other user..."></textarea>
+                <button onclick="joinWithOffer()">Join with Offer</button>
+            </div>
+        </div>
+        
+        <!-- Video Section -->
+        <div id="video-section" class="hidden">
+            <div class="video-container">
+                <div>
+                    <h3>📹 You</h3>
+                    <div id="local-video" class="video-box">
+                        <video id="localVideoElement" autoplay muted></video>
+                    </div>
+                    <button onclick="toggleMute()">🔊 Mute</button>
+                    <button onclick="toggleVideo()">📹 Video Off</button>
+                </div>
+                <div>
+                    <h3>📹 Remote User</h3>
+                    <div id="remote-video" class="video-box">
+                        <video id="remoteVideoElement" autoplay></video>
+                    </div>
+                    <div id="remote-info">Waiting for remote user...</div>
+                </div>
+            </div>
+            
+            <!-- Offer/Answer Exchange -->
+            <div class="offer-section">
+                <h4>📤 Share this offer/answer:</h4>
+                <textarea id="offer-output" class="offer-text" readonly placeholder="Offer/Answer will appear here..."></textarea>
+                <button onclick="copyOffer()">Copy to Clipboard</button>
+            </div>
+            
+            <!-- Chat -->
+            <div>
+                <h4>💬 Chat</h4>
+                <div id="chat" class="chat"></div>
+                <div>
+                    <input type="text" id="chat-input" placeholder="Type a message..." onkeypress="handleChatKeypress(event)">
+                    <button onclick="sendChatMessage()">Send</button>
+                </div>
+            </div>
+            
+            <button onclick="endCall()">🚪 End Call</button>
+        </div>
+        
+        <!-- Logs -->
+        <h3>📋 Logs</h3>
+        <div id="logs"></div>
+    </div>
+
+    <script>
+        // WebRTC implementation without external dependencies
+        class SimpleWebRTCCall {
+            constructor() {
+                this.localStream = null;
+                this.remoteStream = null;
+                this.peerConnection = null;
+                this.backendUrl = 'http://localhost:8080';
+                this.roomName = '';
+                this.username = '';
+                this.isInitiator = false;
+                
+                // WebRTC configuration
+                this.config = {
+                    iceServers: [
+                        { urls: 'stun:stun.l.google.com:19302' },
+                        { urls: 'stun:stun1.l.google.com:19302' }
+                    ]
+                };
+                
+                this.log('WebRTC app initialized');
+            }
+            
+            log(message) {
+                const logsDiv = document.getElementById('logs');
+                const timestamp = new Date().toLocaleTimeString();
+                logsDiv.innerHTML += `[${timestamp}] ${message}<br>`;
+                logsDiv.scrollTop = logsDiv.scrollHeight;
+                console.log(message);
+            }
+            
+            updateStatus(message, type = 'info') {
+                const statusDiv = document.getElementById('status');
+                statusDiv.textContent = message;
+                statusDiv.className = `status ${type}`;
+            }
+            
+            async testBackendTokens() {
+                try {
+                    this.log('Testing backend tokens...');
+                    const uid = document.getElementById('test-uid').value;
+                    
+                    // Test RTM token
+                    const rtmResponse = await fetch(`${this.backendUrl}/rtm-token?uid=${uid}`);
+                    const rtmData = await rtmResponse.json();
+                    
+                    // Test Media token
+                    const mediaResponse = await fetch(`${this.backendUrl}/media-token?channelName=testroom&uid=${uid}`);
+                    const mediaData = await mediaResponse.json();
+                    
+                    const resultDiv = document.getElementById('token-result');
+                    resultDiv.innerHTML = `
+                        <div class="status success">
+                            ✅ Backend working!<br>
+                            RTM Token: ${rtmData.token.substring(0, 50)}...<br>
+                            Media Token: ${mediaData.token.substring(0, 50)}...
+                        </div>
+                    `;
+                    
+                    this.log('Backend tokens test successful');
+                    
+                } catch (error) {
+                    const resultDiv = document.getElementById('token-result');
+                    resultDiv.innerHTML = `<div class="status error">❌ Backend error: ${error.message}</div>`;
+                    this.log(`Backend test failed: ${error.message}`);
+                }
+            }
+            
+            async startCall() {
+                try {
+                    this.username = document.getElementById('username').value.trim();
+                    this.roomName = document.getElementById('room').value.trim();
+                    
+                    if (!this.username || !this.roomName) {
+                        alert('Please enter username and room name');
+                        return;
+                    }
+                    
+                    this.isInitiator = true;
+                    this.updateStatus('Starting call...', 'info');
+                    
+                    // Get local media
+                    await this.getLocalMedia();
+                    
+                    // Create peer connection
+                    await this.createPeerConnection();
+                    
+                    // Create offer
+                    const offer = await this.peerConnection.createOffer();
+                    await this.peerConnection.setLocalDescription(offer);
+                    
+                    // Show offer
+                    document.getElementById('offer-output').value = JSON.stringify(offer, null, 2);
+                    
+                    // Show video section
+                    document.getElementById('join-section').classList.add('hidden');
+                    document.getElementById('video-section').classList.remove('hidden');
+                    
+                    this.updateStatus('Call started! Share the offer with the other user.', 'success');
+                    this.log('Call started as initiator');
+                    
+                } catch (error) {
+                    this.updateStatus(`Error: ${error.message}`, 'error');
+                    this.log(`Start call error: ${error.message}`);
+                }
+            }
+            
+            async joinWithOffer() {
+                try {
+                    this.username = document.getElementById('username').value.trim();
+                    this.roomName = document.getElementById('room').value.trim();
+                    const offerText = document.getElementById('offer-input').value.trim();
+                    
+                    if (!this.username || !this.roomName || !offerText) {
+                        alert('Please enter username, room name, and offer');
+                        return;
+                    }
+                    
+                    this.isInitiator = false;
+                    this.updateStatus('Joining call...', 'info');
+                    
+                    // Get local media
+                    await this.getLocalMedia();
+                    
+                    // Create peer connection
+                    await this.createPeerConnection();
+                    
+                    // Set remote description (offer)
+                    const offer = JSON.parse(offerText);
+                    await this.peerConnection.setRemoteDescription(offer);
+                    
+                    // Create answer
+                    const answer = await this.peerConnection.createAnswer();
+                    await this.peerConnection.setLocalDescription(answer);
+                    
+                    // Show answer
+                    document.getElementById('offer-output').value = JSON.stringify(answer, null, 2);
+                    
+                    // Show video section
+                    document.getElementById('offer-section').classList.add('hidden');
+                    document.getElementById('video-section').classList.remove('hidden');
+                    
+                    this.updateStatus('Call joined! Share the answer with the other user.', 'success');
+                    this.log('Call joined as receiver');
+                    
+                } catch (error) {
+                    this.updateStatus(`Error: ${error.message}`, 'error');
+                    this.log(`Join call error: ${error.message}`);
+                }
+            }
+            
+            async getLocalMedia() {
+                try {
+                    const constraints = {
+                        video: true,
+                        audio: true
+                    };
+                    
+                    this.localStream = await navigator.mediaDevices.getUserMedia(constraints);
+                    document.getElementById('localVideoElement').srcObject = this.localStream;
+                    
+                    this.log('Local media obtained');
+                    
+                } catch (error) {
+                    throw new Error(`Failed to get camera/microphone: ${error.message}`);
+                }
+            }
+            
+            async createPeerConnection() {
+                try {
+                    this.peerConnection = new RTCPeerConnection(this.config);
+                    
+                    // Add local stream
+                    this.localStream.getTracks().forEach(track => {
+                        this.peerConnection.addTrack(track, this.localStream);
+                    });
+                    
+                    // Handle remote stream
+                    this.peerConnection.ontrack = (event) => {
+                        this.log('Remote track received');
+                        this.remoteStream = event.streams[0];
+                        document.getElementById('remoteVideoElement').srcObject = this.remoteStream;
+                        document.getElementById('remote-info').textContent = 'Remote user connected!';
+                    };
+                    
+                    // Handle ICE candidates
+                    this.peerConnection.onicecandidate = (event) => {
+                        if (event.candidate) {
+                            this.log('ICE candidate generated');
+                            // In a real app, you'd send this to the other user
+                        }
+                    };
+                    
+                    // Handle connection state changes
+                    this.peerConnection.onconnectionstatechange = () => {
+                        this.log(`Connection state: ${this.peerConnection.connectionState}`);
+                        if (this.peerConnection.connectionState === 'connected') {
+                            this.updateStatus('🟢 Connected to remote user!', 'success');
+                        } else if (this.peerConnection.connectionState === 'disconnected') {
+                            this.updateStatus('🔴 Disconnected', 'error');
+                        }
+                    };
+                    
+                    this.log('Peer connection created');
+                    
+                } catch (error) {
+                    throw new Error(`Failed to create peer connection: ${error.message}`);
+                }
+            }
+            
+            async handleAnswer(answerText) {
+                try {
+                    const answer = JSON.parse(answerText);
+                    await this.peerConnection.setRemoteDescription(answer);
+                    this.log('Answer set successfully');
+                } catch (error) {
+                    this.log(`Error handling answer: ${error.message}`);
+                }
+            }
+            
+            toggleMute() {
+                if (this.localStream) {
+                    const audioTrack = this.localStream.getAudioTracks()[0];
+                    if (audioTrack) {
+                        audioTrack.enabled = !audioTrack.enabled;
+                        this.log(`Microphone ${audioTrack.enabled ? 'enabled' : 'disabled'}`);
+                    }
+                }
+            }
+            
+            toggleVideo() {
+                if (this.localStream) {
+                    const videoTrack = this.localStream.getVideoTracks()[0];
+                    if (videoTrack) {
+                        videoTrack.enabled = !videoTrack.enabled;
+                        this.log(`Camera ${videoTrack.enabled ? 'enabled' : 'disabled'}`);
+                    }
+                }
+            }
+            
+            sendChatMessage() {
+                const input = document.getElementById('chat-input');
+                const message = input.value.trim();
+                
+                if (!message) return;
+                
+                this.addChatMessage(message, 'local');
+                input.value = '';
+                
+                // In a real app, you'd send this via signaling
+                this.log(`Chat message: ${message}`);
+            }
+            
+            addChatMessage(message, type) {
+                const chatDiv = document.getElementById('chat');
+                const messageDiv = document.createElement('div');
+                messageDiv.className = `message ${type}`;
+                messageDiv.textContent = `${this.username}: ${message}`;
+                chatDiv.appendChild(messageDiv);
+                chatDiv.scrollTop = chatDiv.scrollHeight;
+            }
+            
+            endCall() {
+                if (this.localStream) {
+                    this.localStream.getTracks().forEach(track => track.stop());
+                }
+                
+                if (this.peerConnection) {
+                    this.peerConnection.close();
+                }
+                
+                // Reset UI
+                document.getElementById('video-section').classList.add('hidden');
+                document.getElementById('join-section').classList.remove('hidden');
+                document.getElementById('offer-section').classList.add('hidden');
+                document.getElementById('localVideoElement').srcObject = null;
+                document.getElementById('remoteVideoElement').srcObject = null;
+                document.getElementById('chat').innerHTML = '';
+                document.getElementById('offer-output').value = '';
+                
+                this.updateStatus('Call ended', 'info');
+                this.log('Call ended');
+            }
+        }
+        
+        // Global functions
+        let app = null;
+        
+        window.addEventListener('load', () => {
+            app = new SimpleWebRTCCall();
+        });
+        
+        function testTokens() {
+            if (app) app.testBackendTokens();
+        }
+        
+        function startCall() {
+            if (app) app.startCall();
+        }
+        
+        function showJoinSection() {
+            document.getElementById('join-section').classList.add('hidden');
+            document.getElementById('offer-section').classList.remove('hidden');
+        }
+        
+        function joinWithOffer() {
+            if (app) app.joinWithOffer();
+        }
+        
+        function toggleMute() {
+            if (app) app.toggleMute();
+        }
+        
+        function toggleVideo() {
+            if (app) app.toggleVideo();
+        }
+        
+        function sendChatMessage() {
+            if (app) app.sendChatMessage();
+        }
+        
+        function handleChatKeypress(event) {
+            if (event.key === 'Enter') {
+                sendChatMessage();
+            }
+        }
+        
+        function copyOffer() {
+            const offerText = document.getElementById('offer-output');
+            offerText.select();
+            document.execCommand('copy');
+            alert('Offer copied to clipboard!');
+        }
+        
+        function endCall() {
+            if (app) app.endCall();
+        }
+    </script>
+</body>
+</html>

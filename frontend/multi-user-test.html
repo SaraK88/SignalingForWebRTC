@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multi-User Simulation</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background: #f0f2f5; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .user-section { 
+            display: inline-block; 
+            width: 45%; 
+            margin: 10px; 
+            padding: 20px; 
+            background: white; 
+            border-radius: 10px; 
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            vertical-align: top;
+        }
+        .video-box { 
+            background: #000; 
+            height: 200px; 
+            border-radius: 10px; 
+            display: flex; 
+            align-items: center; 
+            justify-content: center; 
+            color: white; 
+            margin: 10px 0;
+        }
+        .video-box video { width: 100%; height: 100%; object-fit: cover; border-radius: 10px; }
+        button { background: #007bff; color: white; padding: 8px 16px; border: none; border-radius: 5px; cursor: pointer; margin: 5px; }
+        button:hover { background: #0056b3; }
+        input { width: 100%; padding: 8px; margin: 5px 0; border: 1px solid #ddd; border-radius: 5px; }
+        .offer-box { background: #f8f9fa; padding: 10px; border-radius: 5px; margin: 10px 0; }
+        .offer-text { width: 100%; height: 80px; font-family: monospace; font-size: 10px; }
+        .status { padding: 5px; border-radius: 3px; margin: 5px 0; font-size: 12px; }
+        .status.success { background: #d4edda; color: #155724; }
+        .status.error { background: #f8d7da; color: #721c24; }
+        .status.info { background: #d1ecf1; color: #0c5460; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>👥 Multi-User WebRTC Simulation</h1>
+        <p>Two simulated users in one page to test WebRTC signaling</p>
+        
+        <!-- User 1 Section -->
+        <div class="user-section">
+            <h3>👤 User 1 (Alice)</h3>
+            <div class="video-box">
+                <video id="user1-local" autoplay muted></video>
+            </div>
+            <div class="video-box">
+                <video id="user1-remote" autoplay></video>
+            </div>
+            <input type="text" id="user1-name" value="Alice" placeholder="User name">
+            <button onclick="startUser1()">Start Call</button>
+            <div id="user1-status" class="status info">Ready</div>
+            <div class="offer-box">
+                <label>Offer/Answer:</label>
+                <textarea id="user1-offer" class="offer-text" readonly placeholder="Will appear here..."></textarea>
+                <button onclick="copyUser1Offer()">Copy</button>
+                <button onclick="pasteToUser2()">Paste to User 2</button>
+            </div>
+        </div>
+        
+        <!-- User 2 Section -->
+        <div class="user-section">
+            <h3>👤 User 2 (Bob)</h3>
+            <div class="video-box">
+                <video id="user2-local" autoplay muted></video>
+            </div>
+            <div class="video-box">
+                <video id="user2-remote" autoplay></video>
+            </div>
+            <input type="text" id="user2-name" value="Bob" placeholder="User name">
+            <button onclick="startUser2()">Join Call</button>
+            <div id="user2-status" class="status info">Ready</div>
+            <div class="offer-box">
+                <label>Offer/Answer:</label>
+                <textarea id="user2-offer" class="offer-text" readonly placeholder="Will appear here..."></textarea>
+                <button onclick="copyUser2Offer()">Copy</button>
+                <button onclick="pasteToUser1()">Paste to User 1</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        class WebRTCUser {
+            constructor(userId, nameElement, localVideoElement, remoteVideoElement, statusElement, offerElement) {
+                this.userId = userId;
+                this.nameElement = nameElement;
+                this.localVideoElement = localVideoElement;
+                this.remoteVideoElement = remoteVideoElement;
+                this.statusElement = statusElement;
+                this.offerElement = offerElement;
+                
+                this.localStream = null;
+                this.remoteStream = null;
+                this.peerConnection = null;
+                this.isInitiator = false;
+                
+                this.config = {
+                    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+                };
+            }
+            
+            updateStatus(message, type = 'info') {
+                this.statusElement.textContent = message;
+                this.statusElement.className = `status ${type}`;
+            }
+            
+            async startCall() {
+                try {
+                    this.isInitiator = true;
+                    this.updateStatus('Getting camera...', 'info');
+                    
+                    // Use different video constraints for each user
+                    const constraints = {
+                        video: {
+                            width: { ideal: this.userId === 1 ? 320 : 640 },
+                            height: { ideal: this.userId === 1 ? 240 : 480 }
+                        },
+                        audio: true
+                    };
+                    
+                    this.localStream = await navigator.mediaDevices.getUserMedia(constraints);
+                    this.localVideoElement.srcObject = this.localStream;
+                    
+                    await this.createPeerConnection();
+                    
+                    const offer = await this.peerConnection.createOffer();
+                    await this.peerConnection.setLocalDescription(offer);
+                    
+                    this.offerElement.value = JSON.stringify(offer, null, 2);
+                    this.updateStatus('Offer created! Copy to User 2', 'success');
+                    
+                } catch (error) {
+                    this.updateStatus(`Error: ${error.message}`, 'error');
+                }
+            }
+            
+            async joinCall() {
+                try {
+                    this.isInitiator = false;
+                    this.updateStatus('Getting camera...', 'info');
+                    
+                    const constraints = {
+                        video: {
+                            width: { ideal: this.userId === 1 ? 320 : 640 },
+                            height: { ideal: this.userId === 1 ? 240 : 480 }
+                        },
+                        audio: true
+                    };
+                    
+                    this.localStream = await navigator.mediaDevices.getUserMedia(constraints);
+                    this.localVideoElement.srcObject = this.localStream;
+                    
+                    await this.createPeerConnection();
+                    
+                    this.updateStatus('Ready for offer! Paste offer from User 1', 'info');
+                    
+                } catch (error) {
+                    this.updateStatus(`Error: ${error.message}`, 'error');
+                }
+            }
+            
+            async createPeerConnection() {
+                this.peerConnection = new RTCPeerConnection(this.config);
+                
+                this.localStream.getTracks().forEach(track => {
+                    this.peerConnection.addTrack(track, this.localStream);
+                });
+                
+                this.peerConnection.ontrack = (event) => {
+                    this.remoteStream = event.streams[0];
+                    this.remoteVideoElement.srcObject = this.remoteStream;
+                    this.updateStatus('🟢 Connected to remote user!', 'success');
+                };
+                
+                this.peerConnection.onicecandidate = (event) => {
+                    if (event.candidate) {
+                        console.log(`User ${this.userId}: ICE candidate`);
+                    }
+                };
+                
+                this.peerConnection.onconnectionstatechange = () => {
+                    console.log(`User ${this.userId}: ${this.peerConnection.connectionState}`);
+                };
+            }
+            
+            async handleOffer(offerText) {
+                try {
+                    const offer = JSON.parse(offerText);
+                    await this.peerConnection.setRemoteDescription(offer);
+                    
+                    const answer = await this.peerConnection.createAnswer();
+                    await this.peerConnection.setLocalDescription(answer);
+                    
+                    this.offerElement.value = JSON.stringify(answer, null, 2);
+                    this.updateStatus('Answer created! Copy to User 1', 'success');
+                    
+                } catch (error) {
+                    this.updateStatus(`Error handling offer: ${error.message}`, 'error');
+                }
+            }
+            
+            async handleAnswer(answerText) {
+                try {
+                    const answer = JSON.parse(answerText);
+                    await this.peerConnection.setRemoteDescription(answer);
+                    this.updateStatus('🟢 Connection established!', 'success');
+                    
+                } catch (error) {
+                    this.updateStatus(`Error handling answer: ${error.message}`, 'error');
+                }
+            }
+            
+            endCall() {
+                if (this.localStream) {
+                    this.localStream.getTracks().forEach(track => track.stop());
+                }
+                if (this.peerConnection) {
+                    this.peerConnection.close();
+                }
+                this.localVideoElement.srcObject = null;
+                this.remoteVideoElement.srcObject = null;
+                this.updateStatus('Call ended', 'info');
+            }
+        }
+        
+        // Create two users
+        let user1, user2;
+        
+        window.addEventListener('load', () => {
+            user1 = new WebRTCUser(
+                1,
+                document.getElementById('user1-name'),
+                document.getElementById('user1-local'),
+                document.getElementById('user1-remote'),
+                document.getElementById('user1-status'),
+                document.getElementById('user1-offer')
+            );
+            
+            user2 = new WebRTCUser(
+                2,
+                document.getElementById('user2-name'),
+                document.getElementById('user2-local'),
+                document.getElementById('user2-remote'),
+                document.getElementById('user2-status'),
+                document.getElementById('user2-offer')
+            );
+        });
+        
+        function startUser1() {
+            if (user1) user1.startCall();
+        }
+        
+        function startUser2() {
+            if (user2) user2.joinCall();
+        }
+        
+        function copyUser1Offer() {
+            const offerText = document.getElementById('user1-offer').value;
+            navigator.clipboard.writeText(offerText);
+            alert('User 1 offer copied!');
+        }
+        
+        function copyUser2Offer() {
+            const offerText = document.getElementById('user2-offer').value;
+            navigator.clipboard.writeText(offerText);
+            alert('User 2 offer/answer copied!');
+        }
+        
+        function pasteToUser2() {
+            const user1Offer = document.getElementById('user1-offer').value;
+            if (user2 && user1Offer) {
+                user2.handleOffer(user1Offer);
+            }
+        }
+        
+        function pasteToUser1() {
+            const user2Answer = document.getElementById('user2-offer').value;
+            if (user1 && user2Answer) {
+                user1.handleAnswer(user2Answer);
+            }
+        }
+    </script>
+</body>
+</html>

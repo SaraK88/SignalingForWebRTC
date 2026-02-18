@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebRTC Working Version</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f0f2f5; }
+        .app-container { max-width: 1200px; margin: 0 auto; background: white; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); overflow: hidden; }
+        .header { background: #007bff; color: white; padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; }
+        .main-content { display: flex; height: 500px; }
+        .chat-section { flex: 1; border-right: 1px solid #ddd; display: flex; flex-direction: column; }
+        .video-section { width: 400px; background: #f8f9fa; display: flex; flex-direction: column; }
+        .chat-messages { flex: 1; padding: 20px; overflow-y: auto; min-height: 0; }
+        .chat-input { padding: 15px; border-top: 1px solid #ddd; }
+        .chat-input input { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 5px; }
+        .video-container { flex: 1; display: grid; grid-template-rows: 1fr 1fr; gap: 10px; padding: 10px; min-height: 200px; }
+        .video-box { background: #000; border-radius: 10px; display: flex; align-items: center; justify-content: center; color: white; position: relative; }
+        .video-box video { width: 100%; height: 100%; object-fit: cover; border-radius: 10px; }
+        .video-label { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.7); color: white; padding: 5px 10px; border-radius: 5px; font-size: 12px; }
+        .controls { padding: 15px; background: white; border-top: 1px solid #ddd; display: flex; justify-content: center; gap: 10px; }
+        .btn { padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; font-size: 14px; }
+        .btn-primary { background: #007bff; color: white; }
+        .btn-success { background: #28a745; color: white; }
+        .btn-danger { background: #dc3545; color: white; }
+        .btn-warning { background: #ffc107; color: black; }
+        .btn:hover { opacity: 0.8; }
+        .btn.enabled { background: #28a745 !important; cursor: pointer !important; opacity: 1 !important; }
+        .message { margin: 10px 0; padding: 10px; border-radius: 10px; max-width: 70%; }
+        .message.sent { background: #007bff; color: white; margin-left: auto; }
+        .message.received { background: #e9ecef; color: #333; }
+        .message .sender { font-weight: bold; font-size: 12px; margin-bottom: 5px; }
+        .message .text { font-size: 14px; }
+        .connection-status { padding: 10px; text-align: center; font-size: 12px; }
+        .status-connected { background: #d4edda; color: #155724; }
+        .status-connecting { background: #fff3cd; color: #856404; }
+        .status-disconnected { background: #f8d7da; color: #721c24; }
+        .user-info { display: flex; align-items: center; gap: 10px; }
+        .user-info input { padding: 8px; border: 1px solid #ddd; border-radius: 5px; }
+        .call-controls { display: flex; gap: 10px; align-items: center; }
+        .call-controls .btn { padding: 8px 15px; font-size: 12px; }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <div class="header">
+            <h2>📹 WebRTC Working Version</h2>
+            <div class="user-info">
+                <input type="text" id="username" placeholder="Your Name" value="User1">
+                <input type="text" id="room" placeholder="Room" value="main-room">
+                <button class="btn btn-primary" onclick="connect()">Connect</button>
+            </div>
+        </div>
+        
+        <div class="main-content">
+            <!-- Chat Section -->
+            <div class="chat-section">
+                <div class="chat-messages" id="chatMessages">
+                    <div class="message received">
+                        <div class="sender">System</div>
+                        <div class="text">Welcome to Video Chat! Connect to start.</div>
+                    </div>
+                </div>
+                <div class="chat-input">
+                    <input type="text" id="messageInput" placeholder="Type a message..." onkeypress="if(event.key==='Enter') sendMessage()">
+                </div>
+            </div>
+            
+            <!-- Video Section -->
+            <div class="video-section">
+                <div class="connection-status status-disconnected" id="connectionStatus">
+                    📡 Not Connected
+                </div>
+                
+                <div class="video-container">
+                    <div class="video-box">
+                        <video id="localVideo" autoplay muted></video>
+                        <div class="video-label">📹 You</div>
+                    </div>
+                    <div class="video-box">
+                        <video id="remoteVideo" autoplay></video>
+                        <div class="video-label" id="remoteLabel">📹 Remote User</div>
+                    </div>
+                </div>
+                
+                <div class="controls">
+                    <div class="call-controls">
+                        <button class="btn btn-success enabled" id="startCallBtn" onclick="startCall()">📞 Start Call</button>
+                        <button class="btn btn-warning" id="answerCallBtn" onclick="answerCall()" style="display: none;">✅ Answer</button>
+                        <button class="btn btn-danger" id="endCallBtn" onclick="endCall()" disabled>🚪 End Call</button>
+                    </div>
+                    <div class="call-controls">
+                        <button class="btn btn-primary" id="muteBtn" onclick="toggleMute()" disabled>🔊 Mute</button>
+                        <button class="btn btn-primary" id="videoBtn" onclick="toggleVideo()" disabled>📹 Video Off</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1.6.1/dist/sockjs.min.js?v=123"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js?v=123"></script>
+    <script>
+        console.log('=== LOADING WORKING VERSION ===');
+        
+        class WorkingWebRTC {
+            constructor() {
+                this.username = '';
+                this.room = '';
+                this.localStream = null;
+                this.remoteStream = null;
+                this.peerConnection = null;
+                this.socket = null;
+                this.isInCall = false;
+                this.isInitiator = false;
+                this.pendingOffer = null;
+                
+                this.backendUrl = 'http://localhost:8081';
+                
+                this.config = {
+                    iceServers: [
+                        { urls: 'stun:stun.l.google.com:19302' }
+                    ]
+                };
+                
+                console.log('Working WebRTC app initialized');
+            }
+            
+            async connectWebSocket() {
+                return new Promise((resolve, reject) => {
+                    try {
+                        if (typeof SockJS === 'undefined') {
+                            throw new Error('SockJS library not loaded');
+                        }
+                        if (typeof Stomp === 'undefined') {
+                            throw new Error('STOMP library not loaded');
+                        }
+                        
+                        console.log('Libraries loaded - SockJS:', typeof SockJS, 'STOMP:', typeof Stomp);
+                        
+                        this.socket = new SockJS(`${this.backendUrl}/ws`);
+                        this.stompClient = Stomp.over(this.socket);
+                        
+                        this.stompClient.debug = (msg) => console.log('STOMP Debug:', msg);
+                        
+                        this.stompClient.connect({}, async (frame) => {
+                            console.log('Connected to WebSocket: ' + frame);
+                            this.updateConnectionStatus('connected', '✅ Connected to signaling server');
+                            
+                            await this.joinRoom();
+                            
+                            this.stompClient.subscribe(`/topic/signaling/${this.room}`, (message) => {
+                                const signalingMessage = JSON.parse(message.body);
+                                console.log('Received signaling message:', signalingMessage);
+                                this.handleSignalingMessage(signalingMessage);
+                            });
+                            
+                            resolve();
+                            
+                        }, (error) => {
+                            console.error('WebSocket connection error:', error);
+                            this.updateConnectionStatus('disconnected', '❌ Connection failed');
+                            resolve();
+                        });
+                        
+                    } catch (error) {
+                        console.error('WebSocket setup error:', error);
+                        this.updateConnectionStatus('disconnected', '❌ WebSocket setup failed');
+                        resolve();
+                    }
+                });
+            }
+            
+            async joinRoom() {
+                try {
+                    console.log('Joining room:', this.room, 'for user:', this.username);
+                    
+                    if (!this.room || !this.username) {
+                        throw new Error('Room name and username are required');
+                    }
+                    
+                    const response = await fetch(`${this.backendUrl}/api/v1/signaling/rooms/${this.room}/join`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            username: this.username
+                        })
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    }
+                    
+                    const result = await response.json();
+                    console.log('Joined room successfully:', result);
+                    
+                } catch (error) {
+                    console.error('Join room error:', error);
+                    this.addSystemMessage(`❌ Failed to join room: ${error.message}`);
+                }
+            }
+            
+            updateConnectionStatus(status, message) {
+                const statusElement = document.getElementById('connectionStatus');
+                statusElement.textContent = message;
+                statusElement.className = `connection-status status-${status}`;
+            }
+            
+            async connect() {
+                try {
+                    console.log('=== CONNECT() START ===');
+                    
+                    this.username = document.getElementById('username').value.trim();
+                    this.room = document.getElementById('room').value.trim();
+                    
+                    if (!this.username || !this.room) {
+                        alert('Please enter username and room');
+                        return;
+                    }
+                    
+                    this.updateConnectionStatus('connecting', '🔄 Connecting...');
+                    
+                    await this.connectWebSocket();
+                    
+                    console.log('Getting user media...');
+                    try {
+                        this.localStream = await navigator.mediaDevices.getUserMedia({ 
+                            video: true, 
+                            audio: true 
+                        });
+                        console.log('Local media obtained successfully:', this.localStream);
+                    } catch (mediaError) {
+                        console.error('Failed to get user media:', mediaError);
+                        this.updateConnectionStatus('disconnected', `❌ Camera/Mic access denied: ${mediaError.message}`);
+                        alert('Please allow camera and microphone access to make calls.');
+                        return;
+                    }
+                    
+                    if (!this.localStream) {
+                        console.error('Local stream is still null after getUserMedia');
+                        this.updateConnectionStatus('disconnected', '❌ No media stream available');
+                        return;
+                    }
+                    
+                    console.log('Setting local video stream...');
+                    document.getElementById('localVideo').srcObject = this.localStream;
+                    
+                    this.updateConnectionStatus('connected', '🟢 Connected');
+                    
+                    console.log('About to enable controls...');
+                    this.enableControls();
+                    console.log('Controls enabled successfully');
+                    
+                    this.addSystemMessage(`Connected to room: ${this.room}`);
+                    
+                    console.log('=== CONNECT() END ===');
+                    
+                } catch (error) {
+                    this.updateConnectionStatus('disconnected', `❌ Error: ${error.message}`);
+                    console.error('Connection error:', error);
+                }
+            }
+            
+            enableControls() {
+                console.log('=== ENABLING CONTROLS ===');
+                const startCallBtn = document.getElementById('startCallBtn');
+                const muteBtn = document.getElementById('muteBtn');
+                const videoBtn = document.getElementById('videoBtn');
+                
+                console.log('Found startCallBtn:', startCallBtn);
+                console.log('Start button current disabled state:', startCallBtn?.disabled);
+                console.log('Start button current classes:', startCallBtn?.className);
+                
+                if (startCallBtn) {
+                    startCallBtn.removeAttribute('disabled');
+                    startCallBtn.disabled = false;
+                    startCallBtn.classList.add('enabled');
+                    
+                    console.log('Start Call button enabled!');
+                    console.log('New disabled state:', startCallBtn.disabled);
+                    console.log('Has disabled attribute:', startCallBtn.hasAttribute('disabled'));
+                    console.log('Button classes:', startCallBtn.className);
+                }
+                
+                if (muteBtn) {
+                    muteBtn.disabled = false;
+                    console.log('Mute button enabled!');
+                }
+                if (videoBtn) {
+                    videoBtn.disabled = false;
+                    console.log('Video button enabled!');
+                }
+                
+                console.log('=== ENABLING CONTROLS END ===');
+            }
+            
+            async startCall() {
+                try {
+                    console.log('=== START CALL START ===');
+                    console.log('Current isInCall:', this.isInCall);
+                    console.log('Current isInitiator:', this.isInitiator);
+                    
+                    this.isInitiator = true;
+                    this.isInCall = true;
+                    
+                    this.updateConnectionStatus('connecting', '📞 Starting call...');
+                    
+                    console.log('Creating peer connection...');
+                    this.createPeerConnection();
+                    
+                    console.log('Creating offer...');
+                    const offer = await this.peerConnection.createOffer();
+                    console.log('Offer created:', offer);
+                    
+                    console.log('Setting local description with offer...');
+                    await this.peerConnection.setLocalDescription(offer);
+                    console.log('Local description set successfully');
+                    
+                    console.log('Sending offer via signaling...');
+                    await this.sendSignalingMessage({
+                        type: 'offer',
+                        offer: offer,
+                        from: this.username,
+                        room: this.room
+                    });
+                    
+                    this.updateConnectionStatus('connected', '📞 Calling...');
+                    this.updateCallControls(true);
+                    
+                    this.addSystemMessage('Calling...');
+                    
+                    console.log('=== START CALL END ===');
+                    
+                } catch (error) {
+                    console.error('Start call error:', error);
+                    this.updateConnectionStatus('disconnected', `❌ Call failed: ${error.message}`);
+                }
+            }
+            
+            async answerCall() {
+                try {
+                    console.log('=== ANSWER CALL START ===');
+                    console.log('Current isInCall:', this.isInCall);
+                    console.log('Current isInitiator:', this.isInitiator);
+                    console.log('Pending offer:', this.pendingOffer);
+                    
+                    this.isInitiator = false;
+                    this.isInCall = true;
+                    
+                    console.log('Creating peer connection...');
+                    this.createPeerConnection();
+                    
+                    console.log('Setting remote description with pending offer...');
+                    await this.peerConnection.setRemoteDescription(this.pendingOffer);
+                    console.log('Remote description set successfully');
+                    
+                    console.log('Creating answer...');
+                    const answer = await this.peerConnection.createAnswer();
+                    console.log('Answer created:', answer);
+                    
+                    console.log('Setting local description with answer...');
+                    await this.peerConnection.setLocalDescription(answer);
+                    console.log('Local description set successfully');
+                    
+                    console.log('Sending answer via signaling...');
+                    await this.sendSignalingMessage({
+                        type: 'answer',
+                        answer: answer,
+                        from: this.username,
+                        room: this.room
+                    });
+                    
+                    this.updateConnectionStatus('connected', '🟢 In Call');
+                    this.updateCallControls(true);
+                    
+                    this.addSystemMessage('Call connected!');
+                    
+                    console.log('=== ANSWER CALL END ===');
+                    
+                } catch (error) {
+                    console.error('Answer call error:', error);
+                }
+            }
+            
+            createPeerConnection() {
+                this.peerConnection = new RTCPeerConnection(this.config);
+                
+                this.localStream.getTracks().forEach(track => {
+                    this.peerConnection.addTrack(track, this.localStream);
+                });
+                
+                this.peerConnection.ontrack = (event) => {
+                    this.remoteStream = event.streams[0];
+                    document.getElementById('remoteVideo').srcObject = this.remoteStream;
+                    
+                    const remoteLabel = document.getElementById('remoteLabel');
+                    remoteLabel.textContent = `📹 Remote User`;
+                    
+                    this.updateConnectionStatus('connected', '🟢 In Call');
+                };
+                
+                this.peerConnection.onicecandidate = (event) => {
+                    if (event.candidate) {
+                        this.sendSignalingMessage({
+                            type: 'ice-candidate',
+                            candidate: event.candidate,
+                            from: this.username,
+                            room: this.room
+                        });
+                    }
+                };
+            }
+            
+            async sendSignalingMessage(message) {
+                try {
+                    if (this.stompClient && this.stompClient.connected) {
+                        this.stompClient.send('/app/signaling', {}, JSON.stringify(message));
+                        console.log('Sent via WebSocket:', message);
+                    } else {
+                        console.log('WebSocket not connected, message not sent');
+                    }
+                    
+                } catch (error) {
+                    console.error('Send signaling error:', error);
+                    this.updateConnectionStatus('disconnected', `❌ Signaling failed: ${error.message}`);
+                }
+            }
+            
+            async handleSignalingMessage(message) {
+                try {
+                    console.log('=== HANDLING SIGNALING MESSAGE ===');
+                    console.log('Message type:', message.type);
+                    console.log('Message from:', message.from);
+                    console.log('Current isInCall:', this.isInCall);
+                    console.log('Current isInitiator:', this.isInitiator);
+                    
+                    switch (message.type) {
+                        case 'offer':
+                            console.log('=== PROCESSING OFFER ===');
+                            if (!this.isInCall) {
+                                console.log('Not in call, showing answer button');
+                                document.getElementById('answerCallBtn').style.display = 'inline-block';
+                                this.pendingOffer = message.offer;
+                                this.addSystemMessage(`${message.from} is calling...`);
+                                
+                                console.log('Offer received:', message.offer);
+                                console.log('Pending offer set:', this.pendingOffer);
+                            } else {
+                                console.log('Already in call, ignoring offer');
+                            }
+                            break;
+                            
+                        case 'answer':
+                            console.log('=== PROCESSING ANSWER ===');
+                            if (this.isInitiator && this.peerConnection) {
+                                console.log('Setting remote description with answer:', message.answer);
+                                await this.peerConnection.setRemoteDescription(message.answer);
+                                console.log('Remote description set successfully');
+                            } else {
+                                console.log('Not initiator or no peer connection, ignoring answer');
+                            }
+                            break;
+                            
+                        case 'ice-candidate':
+                            console.log('=== PROCESSING ICE CANDIDATE ===');
+                            if (this.peerConnection) {
+                                console.log('Adding ICE candidate:', message.candidate);
+                                await this.peerConnection.addIceCandidate(message.candidate);
+                                console.log('ICE candidate added successfully');
+                            } else {
+                                console.log('No peer connection, ignoring ICE candidate');
+                            }
+                            break;
+                            
+                        case 'chat':
+                            console.log('=== PROCESSING CHAT MESSAGE ===');
+                            this.addMessage(message.message, message.from === this.username);
+                            break;
+                            
+                        default:
+                            console.log('Unknown message type:', message.type);
+                    }
+                } catch (error) {
+                    console.error('Handle signaling error:', error);
+                }
+            }
+            
+            endCall() {
+                this.isInCall = false;
+                this.isInitiator = false;
+                
+                if (this.localStream) {
+                    this.localStream.getTracks().forEach(track => track.stop());
+                }
+                
+                if (this.peerConnection) {
+                    this.peerConnection.close();
+                }
+                
+                document.getElementById('remoteVideo').srcObject = null;
+                document.getElementById('answerCallBtn').style.display = 'none';
+                
+                this.updateConnectionStatus('connected', '🟢 Connected');
+                this.updateCallControls(false);
+                
+                this.addSystemMessage('Call ended');
+            }
+            
+            toggleMute() {
+                if (this.localStream) {
+                    const audioTrack = this.localStream.getAudioTracks()[0];
+                    audioTrack.enabled = !audioTrack.enabled;
+                    
+                    const muteBtn = document.getElementById('muteBtn');
+                    muteBtn.textContent = audioTrack.enabled ? '🔊 Mute' : '🔇 Unmute';
+                }
+            }
+            
+            toggleVideo() {
+                if (this.localStream) {
+                    const videoTrack = this.localStream.getVideoTracks()[0];
+                    videoTrack.enabled = !videoTrack.enabled;
+                    
+                    const videoBtn = document.getElementById('videoBtn');
+                    videoBtn.textContent = videoTrack.enabled ? '📹 Video Off' : '📹 Video On';
+                }
+            }
+            
+            updateCallControls(inCall) {
+                document.getElementById('startCallBtn').disabled = inCall;
+                document.getElementById('endCallBtn').disabled = !inCall;
+                document.getElementById('muteBtn').disabled = !inCall;
+                document.getElementById('videoBtn').disabled = !inCall;
+            }
+            
+            sendMessage() {
+                const input = document.getElementById('messageInput');
+                const message = input.value.trim();
+                
+                if (message) {
+                    this.addMessage(message, true);
+                    input.value = '';
+                    
+                    this.sendSignalingMessage({
+                        type: 'chat',
+                        username: this.username,
+                        message: message,
+                        room: this.room,
+                        timestamp: Date.now()
+                    });
+                }
+            }
+            
+            addMessage(text, isSent) {
+                const messagesContainer = document.getElementById('chatMessages');
+                const messageDiv = document.createElement('div');
+                messageDiv.className = `message ${isSent ? 'sent' : 'received'}`;
+                
+                messageDiv.innerHTML = `
+                    <div class="sender">${this.username}</div>
+                    <div class="text">${text}</div>
+                `;
+                
+                messagesContainer.appendChild(messageDiv);
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            }
+            
+            addSystemMessage(text) {
+                const messagesContainer = document.getElementById('chatMessages');
+                const messageDiv = document.createElement('div');
+                messageDiv.className = 'message received';
+                
+                messageDiv.innerHTML = `
+                    <div class="sender">System</div>
+                    <div class="text">${text}</div>
+                `;
+                
+                messagesContainer.appendChild(messageDiv);
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            }
+        }
+        
+        // Initialize app and make functions globally available
+        let app;
+        
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('DOM loaded - WORKING VERSION');
+            app = new WorkingWebRTC();
+            
+            window.connect = () => app.connect();
+            window.startCall = () => app.startCall();
+            window.answerCall = () => app.answerCall();
+            window.endCall = () => app.endCall();
+            window.toggleMute = () => app.toggleMute();
+            window.toggleVideo = () => app.toggleVideo();
+            window.sendMessage = () => app.sendMessage();
+            
+            console.log('Working app initialized and ready');
+        });
+    </script>
+</body>
+</html>

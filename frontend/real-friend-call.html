@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real Friend Call - Multi-Browser</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background: #f0f2f5; }
+        .container { max-width: 1000px; margin: 0 auto; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .login-section { text-align: center; padding: 40px; }
+        .form-group { margin: 20px 0; }
+        input { width: 300px; padding: 12px; border: 1px solid #ddd; border-radius: 5px; font-size: 16px; }
+        button { background: #007bff; color: white; padding: 12px 24px; border: none; border-radius: 5px; cursor: pointer; font-size: 16px; margin: 5px; }
+        button:hover { background: #0056b3; }
+        button:disabled { background: #ccc; cursor: not-allowed; }
+        .call-section { display: none; }
+        .video-container { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 20px 0; }
+        .video-box { background: #000; height: 300px; border-radius: 10px; display: flex; align-items: center; justify-content: center; color: white; }
+        .video-box video { width: 100%; height: 100%; object-fit: cover; border-radius: 10px; }
+        .controls { text-align: center; margin: 20px 0; }
+        .incoming-call { 
+            position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); 
+            background: white; padding: 30px; border-radius: 15px; box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+            z-index: 1000; text-align: center; min-width: 300px;
+        }
+        .incoming-call h3 { color: #007bff; margin-bottom: 20px; }
+        .call-buttons { margin-top: 20px; }
+        .accept-btn { background: #28a745; margin-right: 10px; }
+        .decline-btn { background: #dc3545; }
+        .status { padding: 10px; border-radius: 5px; margin: 10px 0; text-align: center; }
+        .status.success { background: #d4edda; color: #155724; }
+        .status.error { background: #f8d7da; color: #721c24; }
+        .status.info { background: #d1ecf1; color: #0c5460; }
+        .status.ringing { background: #fff3cd; color: #856404; }
+        .hidden { display: none; }
+        .online-users { background: #f8f9fa; padding: 15px; border-radius: 5px; margin: 20px 0; }
+        .user-item { display: flex; justify-content: space-between; align-items: center; padding: 10px; border-bottom: 1px solid #ddd; }
+        .user-item:last-child { border-bottom: none; }
+        .call-btn { background: #28a745; font-size: 14px; padding: 8px 16px; }
+        .debug-info { background: #fff3cd; padding: 10px; border-radius: 5px; margin: 10px 0; font-size: 12px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📞 Real Friend Call - Multi-Browser Test</h1>
+        
+        <!-- Login Section -->
+        <div id="login-section" class="login-section">
+            <h2>Join Call Network</h2>
+            <div class="form-group">
+                <input type="text" id="username" placeholder="Your Name" value="">
+            </div>
+            <div class="form-group">
+                <input type="text" id="room" placeholder="Room Name" value="video-room">
+            </div>
+            <button onclick="joinNetwork()">Join Network</button>
+            
+            <div class="debug-info">
+                <strong>📋 Instructions:</strong><br>
+                1. Open this page in 2 different browsers (Chrome + Firefox)<br>
+                2. Use different names (Alice, Bob)<br>
+                3. Use same room name<br>
+                4. Both users will appear in "Online Users"<br>
+                5. Click "Call" to start video call
+            </div>
+        </div>
+        
+        <!-- Call Section -->
+        <div id="call-section" class="call-section">
+            <div class="status" id="connection-status">🟢 Connected to network</div>
+            
+            <!-- Online Users -->
+            <div class="online-users">
+                <h3>👥 Online Users</h3>
+                <div id="users-list">
+                    <div style="color: #666; padding: 20px;">Loading users...</div>
+                </div>
+            </div>
+            
+            <!-- Video Area -->
+            <div class="video-container">
+                <div>
+                    <h4>📹 You</h4>
+                    <div class="video-box">
+                        <video id="local-video" autoplay muted></video>
+                    </div>
+                </div>
+                <div>
+                    <h4>📹 Remote User</h4>
+                    <div class="video-box">
+                        <video id="remote-video" autoplay></video>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="controls">
+                <button onclick="toggleMute()">🔊 Mute</button>
+                <button onclick="toggleVideo()">📹 Video Off</button>
+                <button onclick="endCall()">🚪 End Call</button>
+            </div>
+        </div>
+        
+        <!-- Incoming Call Modal -->
+        <div id="incoming-call" class="incoming-call hidden">
+            <h3>📞 Incoming Call</h3>
+            <p id="caller-name">Someone is calling you...</p>
+            <div class="call-buttons">
+                <button class="accept-btn" onclick="acceptCall()">✅ Accept</button>
+                <button class="decline-btn" onclick="declineCall()">❌ Decline</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        class RealFriendCall {
+            constructor() {
+                this.username = '';
+                this.room = '';
+                this.localStream = null;
+                this.remoteStream = null;
+                this.peerConnection = null;
+                this.isInCall = false;
+                
+                // Use localStorage for cross-tab communication
+                this.storageKey = 'webrtc_users';
+                this.callKey = 'webrtc_calls';
+                
+                this.config = {
+                    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+                };
+                
+                this.setupStorageListeners();
+            }
+            
+            setupStorageListeners() {
+                // Listen for storage changes (cross-tab communication)
+                window.addEventListener('storage', (e) => {
+                    if (e.key === this.storageKey) {
+                        this.updateUsersList();
+                    } else if (e.key === this.callKey) {
+                        this.handleCallSignal(JSON.parse(e.newValue || '{}'));
+                    }
+                });
+            }
+            
+            async joinNetwork() {
+                this.username = document.getElementById('username').value.trim();
+                this.room = document.getElementById('room').value.trim();
+                
+                if (!this.username || !this.room) {
+                    alert('Please enter username and room');
+                    return;
+                }
+                
+                try {
+                    // Get local media
+                    this.localStream = await navigator.mediaDevices.getUserMedia({ 
+                        video: true, 
+                        audio: true 
+                    });
+                    document.getElementById('local-video').srcObject = this.localStream;
+                } catch (error) {
+                    alert('Failed to access camera/microphone: ' + error.message);
+                    return;
+                }
+                
+                // Add user to storage
+                this.addUserToStorage();
+                
+                // Show call section
+                document.getElementById('login-section').style.display = 'none';
+                document.getElementById('call-section').style.display = 'block';
+                
+                // Update users list
+                this.updateUsersList();
+                
+                // Start checking for calls
+                this.startCallChecker();
+                
+                console.log('Joined network:', this.username, this.room);
+            }
+            
+            addUserToStorage() {
+                const users = this.getUsersFromStorage();
+                users[this.username] = {
+                    name: this.username,
+                    room: this.room,
+                    inCall: false,
+                    timestamp: Date.now()
+                };
+                localStorage.setItem(this.storageKey, JSON.stringify(users));
+            }
+            
+            getUsersFromStorage() {
+                const data = localStorage.getItem(this.storageKey);
+                return data ? JSON.parse(data) : {};
+            }
+            
+            updateUsersList() {
+                const users = this.getUsersFromStorage();
+                const sameRoomUsers = Object.values(users).filter(u => 
+                    u.room === this.room && u.name !== this.username && Date.now() - u.timestamp < 30000
+                );
+                
+                const usersList = document.getElementById('users-list');
+                
+                if (sameRoomUsers.length === 0) {
+                    usersList.innerHTML = '<div style="color: #666; padding: 20px;">No other users in room. Open this page in another browser to test!</div>';
+                    return;
+                }
+                
+                usersList.innerHTML = sameRoomUsers.map(user => `
+                    <div class="user-item">
+                        <span>👤 ${user.name}</span>
+                        <button class="call-btn" onclick="app.callUser('${user.name}')" 
+                                ${user.inCall || this.isInCall ? 'disabled' : ''}>
+                            ${user.inCall ? 'In Call' : '📞 Call'}
+                        </button>
+                    </div>
+                `).join('');
+            }
+            
+            startCallChecker() {
+                setInterval(() => {
+                    const calls = localStorage.getItem(this.callKey);
+                    if (calls) {
+                        const callData = JSON.parse(calls);
+                        if (callData.to === this.username && !this.isInCall) {
+                            this.showIncomingCall(callData.from);
+                        }
+                    }
+                }, 1000);
+            }
+            
+            callUser(targetUser) {
+                if (this.isInCall) {
+                    alert('You are already in a call');
+                    return;
+                }
+                
+                console.log('Calling:', targetUser);
+                
+                // Send call signal
+                const callData = {
+                    from: this.username,
+                    to: targetUser,
+                    type: 'call',
+                    timestamp: Date.now()
+                };
+                localStorage.setItem(this.callKey, JSON.stringify(callData));
+                
+                // Update UI
+                this.updateUserStatus(this.username, true);
+                this.updateStatus('🟡 Calling...', 'ringing');
+                
+                // Start WebRTC connection
+                setTimeout(() => this.startWebRTCCall(targetUser, true), 500);
+            }
+            
+            showIncomingCall(callerName) {
+                if (this.isInCall) return;
+                
+                document.getElementById('caller-name').textContent = `${callerName} is calling you...`;
+                document.getElementById('incoming-call').classList.remove('hidden');
+                
+                // Auto-decline after 10 seconds
+                setTimeout(() => {
+                    if (!this.isInCall) {
+                        this.declineCall();
+                    }
+                }, 10000);
+            }
+            
+            async acceptCall() {
+                document.getElementById('incoming-call').classList.add('hidden');
+                
+                const callerName = document.getElementById('caller-name').textContent.replace(' is calling you...', '');
+                
+                // Send accept signal
+                const acceptData = {
+                    from: this.username,
+                    to: callerName,
+                    type: 'accept',
+                    timestamp: Date.now()
+                };
+                localStorage.setItem(this.callKey, JSON.stringify(acceptData));
+                
+                // Start WebRTC connection
+                await this.startWebRTCCall(callerName, false);
+            }
+            
+            declineCall() {
+                document.getElementById('incoming-call').classList.add('hidden');
+                
+                // Send decline signal
+                const declineData = {
+                    from: this.username,
+                    type: 'decline',
+                    timestamp: Date.now()
+                };
+                localStorage.setItem(this.callKey, JSON.stringify(declineData));
+            }
+            
+            async startWebRTCCall(remoteUser, isInitiator) {
+                this.isInCall = true;
+                this.updateUserStatus(this.username, true);
+                this.updateStatus('🟡 Connecting...', 'info');
+                
+                try {
+                    this.peerConnection = new RTCPeerConnection(this.config);
+                    
+                    // Add local tracks
+                    this.localStream.getTracks().forEach(track => {
+                        this.peerConnection.addTrack(track, this.localStream);
+                    });
+                    
+                    // Handle remote stream
+                    this.peerConnection.ontrack = (event) => {
+                        this.remoteStream = event.streams[0];
+                        document.getElementById('remote-video').srcObject = this.remoteStream;
+                        this.updateStatus('🟢 Connected', 'success');
+                    };
+                    
+                    // Handle ICE candidates
+                    this.peerConnection.onicecandidate = (event) => {
+                        if (event.candidate) {
+                            this.sendSignal({
+                                type: 'ice-candidate',
+                                candidate: event.candidate,
+                                from: this.username,
+                                to: remoteUser
+                            });
+                        }
+                    };
+                    
+                    if (isInitiator) {
+                        // Create offer
+                        const offer = await this.peerConnection.createOffer();
+                        await this.peerConnection.setLocalDescription(offer);
+                        
+                        this.sendSignal({
+                            type: 'offer',
+                            offer: offer,
+                            from: this.username,
+                            to: remoteUser
+                        });
+                    } else {
+                        // Wait for offer
+                        this.waitForOffer(remoteUser);
+                    }
+                    
+                } catch (error) {
+                    console.error('WebRTC error:', error);
+                    this.updateStatus('Connection failed', 'error');
+                }
+            }
+            
+            waitForOffer(remoteUser) {
+                const checkOffer = () => {
+                    const calls = localStorage.getItem(this.callKey);
+                    if (calls) {
+                        const callData = JSON.parse(calls);
+                        if (callData.type === 'offer' && callData.to === this.username) {
+                            this.handleOffer(callData.offer, remoteUser);
+                        } else {
+                            setTimeout(checkOffer, 100);
+                        }
+                    }
+                };
+                checkOffer();
+            }
+            
+            async handleOffer(offer, remoteUser) {
+                await this.peerConnection.setRemoteDescription(offer);
+                const answer = await this.peerConnection.createAnswer();
+                await this.peerConnection.setLocalDescription(answer);
+                
+                this.sendSignal({
+                    type: 'answer',
+                    answer: answer,
+                    from: this.username,
+                    to: remoteUser
+                });
+            }
+            
+            async handleSignal(signal) {
+                if (signal.to !== this.username) return;
+                
+                try {
+                    if (signal.type === 'offer' && this.peerConnection) {
+                        await this.handleOffer(signal.offer, signal.from);
+                    } else if (signal.type === 'answer' && this.peerConnection) {
+                        await this.peerConnection.setRemoteDescription(signal.answer);
+                        this.updateStatus('🟢 Connected', 'success');
+                    } else if (signal.type === 'ice-candidate' && this.peerConnection) {
+                        await this.peerConnection.addIceCandidate(signal.candidate);
+                    }
+                } catch (error) {
+                    console.error('Signal handling error:', error);
+                }
+            }
+            
+            sendSignal(signal) {
+                signal.timestamp = Date.now();
+                localStorage.setItem(this.callKey, JSON.stringify(signal));
+            }
+            
+            updateUserStatus(username, inCall) {
+                const users = this.getUsersFromStorage();
+                if (users[username]) {
+                    users[username].inCall = inCall;
+                    localStorage.setItem(this.storageKey, JSON.stringify(users));
+                    this.updateUsersList();
+                }
+            }
+            
+            toggleMute() {
+                if (this.localStream) {
+                    const audioTrack = this.localStream.getAudioTracks()[0];
+                    audioTrack.enabled = !audioTrack.enabled;
+                }
+            }
+            
+            toggleVideo() {
+                if (this.localStream) {
+                    const videoTrack = this.localStream.getVideoTracks()[0];
+                    videoTrack.enabled = !videoTrack.enabled;
+                }
+            }
+            
+            endCall() {
+                this.isInCall = false;
+                
+                if (this.localStream) {
+                    this.localStream.getTracks().forEach(track => track.stop());
+                }
+                
+                if (this.peerConnection) {
+                    this.peerConnection.close();
+                }
+                
+                document.getElementById('remote-video').srcObject = null;
+                this.updateUserStatus(this.username, false);
+                this.updateStatus('Call ended', 'info');
+            }
+            
+            updateStatus(message, type = 'info') {
+                const statusElement = document.getElementById('connection-status');
+                statusElement.textContent = message;
+                statusElement.className = `status ${type}`;
+            }
+        }
+        
+        let app = null;
+        
+        window.addEventListener('load', () => {
+            app = new RealFriendCall();
+        });
+        
+        function joinNetwork() {
+            if (app) app.joinNetwork();
+        }
+        
+        function callUser(username) {
+            if (app) app.callUser(username);
+        }
+        
+        function acceptCall() {
+            if (app) app.acceptCall();
+        }
+        
+        function declineCall() {
+            if (app) app.declineCall();
+        }
+        
+        function toggleMute() {
+            if (app) app.toggleMute();
+        }
+        
+        function toggleVideo() {
+            if (app) app.toggleVideo();
+        }
+        
+        function endCall() {
+            if (app) app.endCall();
+        }
+    </script>
+</body>
+</html>

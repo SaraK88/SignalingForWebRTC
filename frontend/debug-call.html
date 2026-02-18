@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Debug Call Process</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background: #f0f2f5; }
+        .container { max-width: 800px; margin: 0 auto; background: white; padding: 20px; border-radius: 10px; }
+        .section { margin: 20px 0; padding: 20px; border: 1px solid #ddd; border-radius: 5px; }
+        button { background: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; margin: 5px; }
+        textarea { width: 100%; height: 100px; font-family: monospace; font-size: 11px; border: 1px solid #ddd; padding: 10px; border-radius: 5px; }
+        .video-box { background: #000; height: 200px; border-radius: 10px; display: flex; align-items: center; justify-content: center; color: white; margin: 10px 0; }
+        .video-box video { width: 100%; height: 100%; object-fit: cover; border-radius: 10px; }
+        .status { padding: 10px; border-radius: 5px; margin: 10px 0; text-align: center; }
+        .status.success { background: #d4edda; color: #155724; }
+        .status.error { background: #f8d7da; color: #721c24; }
+        .status.info { background: #d1ecf1; color: #0c5460; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 Debug Call Process</h1>
+        
+        <!-- Step 1: Setup -->
+        <div class="section">
+            <h3>Step 1: Setup Camera</h3>
+            <button onclick="setupCamera()">Setup Camera</button>
+            <div id="setup-status" class="status">Not setup</div>
+        </div>
+        
+        <!-- Step 2: Create Offer -->
+        <div class="section">
+            <h3>Step 2: Create Offer</h3>
+            <button onclick="createOffer()" id="offer-btn" disabled>Create Offer</button>
+            <textarea id="offer-text" readonly placeholder="Offer will appear here..."></textarea>
+            <button onclick="copyOffer()" id="copy-btn" disabled>Copy Offer</button>
+            <div id="offer-status" class="status">Ready</div>
+        </div>
+        
+        <!-- Step 3: Process Offer -->
+        <div class="section">
+            <h3>Step 3: Process Offer</h3>
+            <textarea id="remote-offer" placeholder="Paste offer here..."></textarea>
+            <button onclick="processOffer()">Process Offer</button>
+            <textarea id="answer-text" readonly placeholder="Answer will appear here..."></textarea>
+            <button onclick="copyAnswer()" id="copy-answer-btn" disabled>Copy Answer</button>
+            <div id="process-status" class="status">Ready</div>
+        </div>
+        
+        <!-- Step 4: Start Call -->
+        <div class="section">
+            <h3>Step 4: Start Call</h3>
+            <button onclick="startCall()" id="start-btn" class="success" disabled>📞 Start Call</button>
+            <div id="call-status" class="status">Ready</div>
+        </div>
+        
+        <!-- Videos -->
+        <div class="section">
+            <h3>📹 Videos</h3>
+            <div class="video-box">
+                <video id="local-video" autoplay muted></video>
+            </div>
+            <div class="video-box">
+                <video id="remote-video" autoplay></video>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        class DebugCall {
+            constructor() {
+                this.localStream = null;
+                this.remoteStream = null;
+                this.offerPeer = null;
+                this.answerPeer = null;
+                
+                this.config = {
+                    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+                };
+            }
+            
+            updateStatus(elementId, message, type = 'info') {
+                const element = document.getElementById(elementId);
+                element.textContent = message;
+                element.className = `status ${type}`;
+            }
+            
+            async setupCamera() {
+                try {
+                    this.updateStatus('setup-status', 'Getting camera...', 'info');
+                    
+                    this.localStream = await navigator.mediaDevices.getUserMedia({ 
+                        video: true, 
+                        audio: true 
+                    });
+                    
+                    document.getElementById('local-video').srcObject = this.localStream;
+                    document.getElementById('offer-btn').disabled = false;
+                    
+                    this.updateStatus('setup-status', '✅ Camera ready', 'success');
+                    
+                } catch (error) {
+                    this.updateStatus('setup-status', `❌ Error: ${error.message}`, 'error');
+                }
+            }
+            
+            async createOffer() {
+                try {
+                    this.updateStatus('offer-status', 'Creating offer...', 'info');
+                    
+                    this.offerPeer = new RTCPeerConnection(this.config);
+                    
+                    // Add local tracks
+                    this.localStream.getTracks().forEach(track => {
+                        this.offerPeer.addTrack(track, this.localStream);
+                    });
+                    
+                    // Create offer
+                    const offer = await this.offerPeer.createOffer();
+                    await this.offerPeer.setLocalDescription(offer);
+                    
+                    document.getElementById('offer-text').value = JSON.stringify(offer, null, 2);
+                    document.getElementById('copy-btn').disabled = false;
+                    
+                    this.updateStatus('offer-status', '✅ Offer created', 'success');
+                    
+                } catch (error) {
+                    this.updateStatus('offer-status', `❌ Error: ${error.message}`, 'error');
+                    console.error('Create offer error:', error);
+                }
+            }
+            
+            async processOffer() {
+                try {
+                    const offerText = document.getElementById('remote-offer').value.trim();
+                    if (!offerText) {
+                        this.updateStatus('process-status', '❌ Please paste offer', 'error');
+                        return;
+                    }
+                    
+                    this.updateStatus('process-status', 'Processing offer...', 'info');
+                    console.log('Processing offer:', offerText);
+                    
+                    const offer = JSON.parse(offerText);
+                    
+                    this.answerPeer = new RTCPeerConnection(this.config);
+                    
+                    // Add local tracks
+                    this.localStream.getTracks().forEach(track => {
+                        this.answerPeer.addTrack(track, this.localStream);
+                    });
+                    
+                    // Handle remote stream
+                    this.answerPeer.ontrack = (event) => {
+                        this.remoteStream = event.streams[0];
+                        document.getElementById('remote-video').srcObject = this.remoteStream;
+                        console.log('Remote video received!');
+                    };
+                    
+                    // Set remote description
+                    await this.answerPeer.setRemoteDescription(offer);
+                    console.log('Remote description set');
+                    
+                    // Create answer
+                    const answer = await this.answerPeer.createAnswer();
+                    await this.answerPeer.setLocalDescription(answer);
+                    console.log('Answer created');
+                    
+                    document.getElementById('answer-text').value = JSON.stringify(answer, null, 2);
+                    document.getElementById('copy-answer-btn').disabled = false;
+                    document.getElementById('start-btn').disabled = false;
+                    
+                    this.updateStatus('process-status', '✅ Offer processed, answer created', 'success');
+                    
+                } catch (error) {
+                    this.updateStatus('process-status', `❌ Error: ${error.message}`, 'error');
+                    console.error('Process offer error:', error);
+                }
+            }
+            
+            async startCall() {
+                try {
+                    this.updateStatus('call-status', 'Starting call...', 'info');
+                    
+                    // Exchange offers/answers
+                    if (this.offerPeer && this.answerPeer) {
+                        // In real scenario, you'd exchange ICE candidates here
+                        // For demo, we'll just connect them
+                        
+                        this.offerPeer.ontrack = (event) => {
+                            this.remoteStream = event.streams[0];
+                            document.getElementById('remote-video').srcObject = this.remoteStream;
+                        };
+                        
+                        const answerText = document.getElementById('answer-text').value;
+                        if (answerText) {
+                            const answer = JSON.parse(answerText);
+                            await this.offerPeer.setRemoteDescription(answer);
+                        }
+                    }
+                    
+                    this.updateStatus('call-status', '🟢 Call connected!', 'success');
+                    
+                } catch (error) {
+                    this.updateStatus('call-status', `❌ Error: ${error.message}`, 'error');
+                }
+            }
+            
+            copyOffer() {
+                const offerText = document.getElementById('offer-text').value;
+                navigator.clipboard.writeText(offerText).then(() => {
+                    alert('Offer copied!');
+                });
+            }
+            
+            copyAnswer() {
+                const answerText = document.getElementById('answer-text').value;
+                navigator.clipboard.writeText(answerText).then(() => {
+                    alert('Answer copied!');
+                });
+            }
+        }
+        
+        let app = null;
+        
+        window.addEventListener('load', () => {
+            app = new DebugCall();
+        });
+        
+        function setupCamera() {
+            if (app) app.setupCamera();
+        }
+        
+        function createOffer() {
+            if (app) app.createOffer();
+        }
+        
+        function processOffer() {
+            if (app) app.processOffer();
+        }
+        
+        function startCall() {
+            if (app) app.startCall();
+        }
+        
+        function copyOffer() {
+            if (app) app.copyOffer();
+        }
+        
+        function copyAnswer() {
+            if (app) app.copyAnswer();
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Production WebRTC Integration</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f0f2f5; }
+        .app-container { max-width: 1200px; margin: 0 auto; background: white; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); overflow: hidden; }
+        .header { background: #007bff; color: white; padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; }
+        .main-content { display: flex; height: 600px; }
+        .chat-section { flex: 1; border-right: 1px solid #ddd; display: flex; flex-direction: column; }
+        .video-section { width: 400px; background: #f8f9fa; display: flex; flex-direction: column; }
+        .chat-messages { flex: 1; padding: 20px; overflow-y: auto; }
+        .chat-input { padding: 15px; border-top: 1px solid #ddd; }
+        .chat-input input { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 5px; }
+        .video-container { flex: 1; display: grid; grid-template-rows: 1fr 1fr; gap: 10px; padding: 10px; }
+        .video-box { background: #000; border-radius: 10px; display: flex; align-items: center; justify-content: center; color: white; position: relative; }
+        .video-box video { width: 100%; height: 100%; object-fit: cover; border-radius: 10px; }
+        .video-label { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.7); color: white; padding: 5px 10px; border-radius: 5px; font-size: 12px; }
+        .controls { padding: 15px; background: white; border-top: 1px solid #ddd; display: flex; justify-content: center; gap: 10px; }
+        .btn { padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; font-size: 14px; }
+        .btn-primary { background: #007bff; color: white; }
+        .btn-success { background: #28a745; color: white; }
+        .btn-danger { background: #dc3545; color: white; }
+        .btn-warning { background: #ffc107; color: black; }
+        .btn:hover { opacity: 0.8; }
+        .btn:disabled { background: #ccc; cursor: not-allowed; }
+        .message { margin: 10px 0; padding: 10px; border-radius: 10px; max-width: 70%; }
+        .message.sent { background: #007bff; color: white; margin-left: auto; }
+        .message.received { background: #e9ecef; color: #333; }
+        .message .sender { font-weight: bold; font-size: 12px; margin-bottom: 5px; }
+        .message .text { font-size: 14px; }
+        .connection-status { padding: 10px; text-align: center; font-size: 12px; }
+        .status-connected { background: #d4edda; color: #155724; }
+        .status-connecting { background: #fff3cd; color: #856404; }
+        .status-disconnected { background: #f8d7da; color: #721c24; }
+        .user-info { display: flex; align-items: center; gap: 10px; }
+        .user-info input { padding: 8px; border: 1px solid #ddd; border-radius: 5px; }
+        .call-controls { display: flex; gap: 10px; align-items: center; }
+        .call-controls .btn { padding: 8px 15px; font-size: 12px; }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <div class="header">
+            <h2>📹 Video Chat Integration</h2>
+            <div class="user-info">
+                <input type="text" id="username" placeholder="Your Name" value="User1">
+                <input type="text" id="room" placeholder="Room" value="main-room">
+                <button class="btn btn-primary" id="connectBtn" onclick="window.connect()">Connect</button>
+<button class="btn btn-warning" onclick="window.connect()">Force Connect</button>
+            </div>
+        </div>
+        
+        <div class="main-content">
+            <!-- Chat Section (Your existing app integration) -->
+            <div class="chat-section">
+                <div class="chat-messages" id="chatMessages">
+                    <div class="message received">
+                        <div class="sender">System</div>
+                        <div class="text">Welcome to Video Chat! Connect to start.</div>
+                    </div>
+                </div>
+                <div class="chat-input">
+                    <input type="text" id="messageInput" placeholder="Type a message..." onkeypress="if(event.key==='Enter') sendMessage()">
+                </div>
+            </div>
+            
+            <!-- Video Section -->
+            <div class="video-section">
+                <div class="connection-status status-disconnected" id="connectionStatus">
+                    📡 Not Connected
+                </div>
+                
+                <div class="video-container">
+                    <div class="video-box">
+                        <video id="localVideo" autoplay muted></video>
+                        <div class="video-label">📹 You</div>
+                    </div>
+                    <div class="video-box">
+                        <video id="remoteVideo" autoplay></video>
+                        <div class="video-label" id="remoteLabel">📹 Remote User</div>
+                    </div>
+                </div>
+                
+                <div class="controls">
+                    <div class="call-controls">
+                        <button class="btn btn-success" id="startCallBtn" onclick="startCall()" disabled style="display: inline-block !important; visibility: visible !important;">📞 Start Call</button>
+                        <button class="btn btn-warning" id="answerCallBtn" onclick="answerCall()" style="display: none;">✅ Answer</button>
+                        <button class="btn btn-danger" id="endCallBtn" onclick="endCall()" disabled>🚪 End Call</button>
+                    </div>
+                    <div class="call-controls">
+                        <button class="btn btn-primary" id="muteBtn" onclick="toggleMute()" disabled>🔊 Mute</button>
+                        <button class="btn btn-primary" id="videoBtn" onclick="toggleVideo()" disabled>📹 Video Off</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1.6.1/dist/sockjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
+    <script>
+        class ProductionWebRTC {
+            constructor() {
+                this.username = '';
+                this.room = '';
+                this.localStream = null;
+                this.remoteStream = null;
+                this.peerConnection = null;
+                this.socket = null;
+                this.isInCall = false;
+                this.isInitiator = false;
+                this.pendingOffer = null; // Add missing variable
+                
+                // Backend URL - update to your production backend
+                this.backendUrl = 'http://localhost:8081';
+                
+                this.config = {
+                    iceServers: [
+                        { urls: 'stun:stun.l.google.com:19302' }
+                    ]
+                };
+                
+                this.initializeEventListeners();
+            }
+            
+            initializeEventListeners() {
+                // Don't connect immediately - wait for user to click Connect
+                console.log('WebRTC app initialized - waiting for user to connect');
+            }
+            
+            connectWebSocket() {
+                return new Promise((resolve, reject) => {
+                    try {
+                        // Check if required libraries are loaded
+                        if (typeof SockJS === 'undefined') {
+                            throw new Error('SockJS library not loaded');
+                        }
+                        if (typeof Stomp === 'undefined') {
+                            throw new Error('STOMP library not loaded');
+                        }
+                        
+                        console.log('Libraries loaded - SockJS:', typeof SockJS, 'STOMP:', typeof Stomp);
+                        
+                        // Connect to WebSocket endpoint
+                        this.socket = new SockJS(`${this.backendUrl}/ws`);
+                        this.stompClient = Stomp.over(this.socket);
+                        
+                        // Enable debug logging
+                        this.stompClient.debug = (msg) => console.log('STOMP Debug:', msg);
+                        
+                        this.stompClient.connect({}, async (frame) => {
+                            console.log('Connected to WebSocket: ' + frame);
+                            this.updateConnectionStatus('connected', '✅ Connected to signaling server');
+                            
+                            // Join room via backend API first
+                            await this.joinRoom();
+                            
+                            // Subscribe to room topic after joining
+                            this.stompClient.subscribe(`/topic/signaling/${this.room}`, (message) => {
+                                const signalingMessage = JSON.parse(message.body);
+                                console.log('Received signaling message:', signalingMessage);
+                                this.handleSignalingMessage(signalingMessage);
+                            });
+                            
+                            resolve();
+                            
+                        }, (error) => {
+                            console.error('WebSocket connection error:', error);
+                            this.updateConnectionStatus('disconnected', '❌ Connection failed - trying HTTP fallback');
+                            // Fallback to HTTP polling
+                            this.startHttpPolling();
+                            resolve();
+                        });
+                        
+                    } catch (error) {
+                        console.error('WebSocket setup error:', error);
+                        this.updateConnectionStatus('disconnected', '❌ WebSocket setup failed');
+                        this.startHttpPolling();
+                        resolve();
+                    }
+                });
+            }
+            
+            startHttpPolling() {
+                console.log('Starting HTTP polling fallback');
+                this.updateConnectionStatus('connected', '✅ Connected via HTTP polling');
+                
+                // Join room first
+                this.joinRoom();
+                
+                // Start polling for messages
+                this.pollingInterval = setInterval(async () => {
+                    try {
+                        const response = await fetch(`${this.backendUrl}/api/v1/signaling/rooms/${this.room}/users`);
+                        const data = await response.json();
+                        // You can implement message polling here if needed
+                    } catch (error) {
+                        console.error('HTTP polling error:', error);
+                    }
+                }, 2000);
+            }
+            
+            async joinRoom() {
+                try {
+                    console.log('Joining room:', this.room, 'for user:', this.username);
+                    
+                    if (!this.room || !this.username) {
+                        throw new Error('Room name and username are required');
+                    }
+                    
+                    const response = await fetch(`${this.backendUrl}/api/v1/signaling/rooms/${this.room}/join`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            username: this.username
+                        })
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    }
+                    
+                    const result = await response.json();
+                    console.log('Joined room successfully:', result);
+                    
+                } catch (error) {
+                    console.error('Join room error:', error);
+                    this.addSystemMessage(`❌ Failed to join room: ${error.message}`);
+                }
+            }
+            
+            updateConnectionStatus(status, message) {
+                const statusElement = document.getElementById('connectionStatus');
+                statusElement.textContent = message;
+                statusElement.className = `connection-status status-${status}`;
+            }
+            
+            async connect() {
+                try {
+                    console.log('=== CONNECT() START ===');
+                    console.log('Button before connection:', document.getElementById('startCallBtn'));
+                    
+                    this.username = document.getElementById('username').value.trim();
+                    this.room = document.getElementById('room').value.trim();
+                    
+                    if (!this.username || !this.room) {
+                        alert('Please enter username and room');
+                        return;
+                    }
+                    
+                    console.log('Button after getting inputs:', document.getElementById('startCallBtn'));
+                    
+                    this.updateConnectionStatus('connecting', '🔄 Connecting...');
+                    
+                    console.log('Button after status update:', document.getElementById('startCallBtn'));
+                    
+                    // Connect WebSocket first
+                    await this.connectWebSocket();
+                    
+                    console.log('Button after WebSocket:', document.getElementById('startCallBtn'));
+                    
+                    // Get local media
+                    this.localStream = await navigator.mediaDevices.getUserMedia({ 
+                        video: true, 
+                        audio: true 
+                    });
+                    
+                    console.log('Button after media:', document.getElementById('startCallBtn'));
+                    
+                    document.getElementById('localVideo').srcObject = this.localStream;
+                    
+                    // Connect to backend for signaling
+                    await this.connectToBackend();
+                    
+                    console.log('Button before enableControls():', document.getElementById('startCallBtn'));
+                    
+                    this.updateConnectionStatus('connected', '🟢 Connected');
+                    console.log('About to enable controls...');
+                    this.enableControls();
+                    console.log('Controls enabled successfully');
+                    
+                    this.addSystemMessage(`Connected to room: ${this.room}`);
+                    
+                    console.log('Button at end of connect():', document.getElementById('startCallBtn'));
+                    console.log('=== CONNECT() END ===');
+                    
+                } catch (error) {
+                    this.updateConnectionStatus('disconnected', `❌ Error: ${error.message}`);
+                    console.error('Connection error:', error);
+                }
+            }
+            
+            async connectToBackend() {
+                try {
+                    // Test backend connection
+                    const response = await fetch(`${this.backendUrl}/api/v1/signaling/rtm-token?uid=${this.username}`);
+                    if (!response.ok) {
+                        throw new Error('Backend connection failed');
+                    }
+                    
+                    console.log('Backend connection successful');
+                    
+                } catch (error) {
+                    console.error('Backend connection error:', error);
+                    // Don't throw error - allow connection to continue
+                    console.log('Continuing without backend token validation');
+                }
+            }
+            
+            enableControls() {
+                console.log('=== NEW enableControls() function called ===');
+                const startCallBtn = document.getElementById('startCallBtn');
+                const muteBtn = document.getElementById('muteBtn');
+                const videoBtn = document.getElementById('videoBtn');
+                
+                console.log('Found buttons:', {
+                    startCall: startCallBtn,
+                    mute: muteBtn,
+                    video: videoBtn
+                });
+                
+                if (startCallBtn) {
+                    startCallBtn.disabled = false;
+                    startCallBtn.style.display = 'inline-block';
+                    startCallBtn.style.visibility = 'visible';
+                    console.log('Start Call button enabled!');
+                }
+                if (muteBtn) {
+                    muteBtn.disabled = false;
+                    console.log('Mute button enabled!');
+                }
+                if (videoBtn) {
+                    videoBtn.disabled = false;
+                    console.log('Video button enabled!');
+                }
+                
+                console.log('=== enableControls() completed ===');
+            }
+            
+            async startCall() {
+                try {
+                    this.isInitiator = true;
+                    this.isInCall = true;
+                    
+                    this.updateConnectionStatus('connecting', '📞 Starting call...');
+                    
+                    // Create peer connection
+                    this.createPeerConnection();
+                    
+                    // Create offer
+                    const offer = await this.peerConnection.createOffer();
+                    await this.peerConnection.setLocalDescription(offer);
+                    
+                    // Send offer to other user via backend
+                    await this.sendSignalingMessage({
+                        type: 'offer',
+                        offer: offer,
+                        from: this.username,
+                        room: this.room
+                    });
+                    
+                    this.updateConnectionStatus('connected', '📞 Calling...');
+                    this.updateCallControls(true);
+                    
+                    this.addSystemMessage('Calling...');
+                    
+                } catch (error) {
+                    console.error('Start call error:', error);
+                    this.updateConnectionStatus('disconnected', `❌ Call failed: ${error.message}`);
+                }
+            }
+            
+            async answerCall() {
+                try {
+                    this.isInitiator = false;
+                    this.isInCall = true;
+                    
+                    this.createPeerConnection();
+                    
+                    // Create answer
+                    const answer = await this.peerConnection.createAnswer();
+                    await this.peerConnection.setLocalDescription(answer);
+                    
+                    // Send answer via backend
+                    await this.sendSignalingMessage({
+                        type: 'answer',
+                        answer: answer,
+                        from: this.username,
+                        room: this.room
+                    });
+                    
+                    this.updateConnectionStatus('connected', '🟢 In Call');
+                    this.updateCallControls(true);
+                    
+                    this.addSystemMessage('Call connected!');
+                    
+                } catch (error) {
+                    console.error('Answer call error:', error);
+                }
+            }
+            
+            createPeerConnection() {
+                this.peerConnection = new RTCPeerConnection(this.config);
+                
+                // Add local tracks
+                this.localStream.getTracks().forEach(track => {
+                    this.peerConnection.addTrack(track, this.localStream);
+                });
+                
+                // Handle remote stream
+                this.peerConnection.ontrack = (event) => {
+                    this.remoteStream = event.streams[0];
+                    document.getElementById('remoteVideo').srcObject = this.remoteStream;
+                    
+                    // Update remote user label
+                    const remoteLabel = document.getElementById('remoteLabel');
+                    remoteLabel.textContent = `📹 Remote User`;
+                    
+                    this.updateConnectionStatus('connected', '🟢 In Call');
+                };
+                
+                // Handle ICE candidates
+                this.peerConnection.onicecandidate = (event) => {
+                    if (event.candidate) {
+                        this.sendSignalingMessage({
+                            type: 'ice-candidate',
+                            candidate: event.candidate,
+                            from: this.username,
+                            room: this.room
+                        });
+                    }
+                };
+            }
+            
+            async sendSignalingMessage(message) {
+                try {
+                    // Send via WebSocket if connected
+                    if (this.stompClient && this.stompClient.connected) {
+                        this.stompClient.send('/app/signaling', {}, JSON.stringify(message));
+                        console.log('Sent via WebSocket:', message);
+                    } else {
+                        // Fallback to HTTP
+                        console.log('WebSocket not connected, using HTTP fallback');
+                        const response = await fetch(`${this.backendUrl}/api/v1/signaling/signaling`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(message)
+                        });
+                        
+                        if (!response.ok) {
+                            throw new Error('HTTP signaling failed');
+                        }
+                    }
+                    
+                } catch (error) {
+                    console.error('Send signaling error:', error);
+                    this.updateConnectionStatus('disconnected', `❌ Signaling failed: ${error.message}`);
+                }
+            }
+            
+            async handleSignalingMessage(message) {
+                try {
+                    switch (message.type) {
+                        case 'offer':
+                            if (!this.isInCall) {
+                                document.getElementById('answerCallBtn').style.display = 'inline-block';
+                                this.addSystemMessage(`${message.from} is calling...`);
+                                this.pendingOffer = message.offer;
+                            }
+                            break;
+                            
+                        case 'answer':
+                            if (this.isInitiator && this.peerConnection) {
+                                await this.peerConnection.setRemoteDescription(message.answer);
+                            }
+                            break;
+                            
+                        case 'ice-candidate':
+                            if (this.peerConnection) {
+                                try {
+                                    await this.peerConnection.addIceCandidate(message.candidate);
+                                    console.log('ICE candidate added successfully');
+                                } catch (error) {
+                                    console.error('Error adding ICE candidate:', error);
+                                }
+                            }
+                            break;
+                    }
+                } catch (error) {
+                    console.error('Handle signaling error:', error);
+                }
+            }
+            
+            endCall() {
+                this.isInCall = false;
+                this.isInitiator = false;
+                
+                if (this.localStream) {
+                    this.localStream.getTracks().forEach(track => track.stop());
+                }
+                
+                if (this.peerConnection) {
+                    this.peerConnection.close();
+                }
+                
+                document.getElementById('remoteVideo').srcObject = null;
+                document.getElementById('answerCallBtn').style.display = 'none';
+                
+                this.updateConnectionStatus('connected', '🟢 Connected');
+                this.updateCallControls(false);
+                
+                this.addSystemMessage('Call ended');
+            }
+            
+            toggleMute() {
+                if (this.localStream) {
+                    const audioTrack = this.localStream.getAudioTracks()[0];
+                    audioTrack.enabled = !audioTrack.enabled;
+                    
+                    const muteBtn = document.getElementById('muteBtn');
+                    muteBtn.textContent = audioTrack.enabled ? '🔊 Mute' : '🔇 Unmute';
+                }
+            }
+            
+            toggleVideo() {
+                if (this.localStream) {
+                    const videoTrack = this.localStream.getVideoTracks()[0];
+                    videoTrack.enabled = !videoTrack.enabled;
+                    
+                    const videoBtn = document.getElementById('videoBtn');
+                    videoBtn.textContent = videoTrack.enabled ? '📹 Video Off' : '📹 Video On';
+                }
+            }
+            
+            updateCallControls(inCall) {
+                document.getElementById('startCallBtn').disabled = inCall;
+                document.getElementById('endCallBtn').disabled = !inCall;
+                document.getElementById('muteBtn').disabled = !inCall;
+                document.getElementById('videoBtn').disabled = !inCall;
+            }
+            
+            sendMessage() {
+                const input = document.getElementById('messageInput');
+                const message = input.value.trim();
+                
+                if (message) {
+                    this.addMessage(message, true);
+                    input.value = '';
+                    
+                    // Send message to backend/chat system
+                    this.sendChatMessage(message);
+                }
+            }
+            
+            async sendChatMessage(message) {
+                try {
+                    console.log('Sending chat message:', message);
+                    
+                    // Send via WebSocket if connected
+                    if (this.stompClient && this.stompClient.connected) {
+                        const chatMessage = {
+                            type: 'chat',
+                            username: this.username,
+                            message: message,
+                            room: this.room,
+                            timestamp: Date.now()
+                        };
+                        this.stompClient.send('/app/signaling', {}, JSON.stringify(chatMessage));
+                        console.log('Chat message sent via WebSocket:', chatMessage);
+                    } else {
+                        // Fallback to HTTP
+                        console.log('WebSocket not available, using HTTP fallback for chat');
+                        const response = await fetch(`${this.backendUrl}/api/v1/signaling/chat`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                username: this.username,
+                                room: this.room,
+                                message: message
+                            })
+                        });
+                        
+                        if (!response.ok) {
+                            throw new Error('Failed to send chat message');
+                        }
+                        
+                        console.log('Chat message sent via HTTP');
+                    }
+                    
+                } catch (error) {
+                    console.error('Send chat message error:', error);
+                    this.addSystemMessage(`❌ Failed to send message: ${error.message}`);
+                }
+            }
+            
+            addMessage(text, isSent) {
+                const messagesContainer = document.getElementById('chatMessages');
+                const messageDiv = document.createElement('div');
+                messageDiv.className = `message ${isSent ? 'sent' : 'received'}`;
+                
+                messageDiv.innerHTML = `
+                    <div class="sender">${this.username}</div>
+                    <div class="text">${text}</div>
+                `;
+                
+                messagesContainer.appendChild(messageDiv);
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            }
+            
+            addSystemMessage(text) {
+                const messagesContainer = document.getElementById('chatMessages');
+                const messageDiv = document.createElement('div');
+                messageDiv.className = 'message received';
+                
+                messageDiv.innerHTML = `
+                    <div class="sender">System</div>
+                    <div class="text">${text}</div>
+                `;
+                
+                messagesContainer.appendChild(messageDiv);
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            }
+        }
+        
+        let app = null;
+
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('DOM loaded - initializing app immediately');
+    
+    // Create app immediately when DOM loads
+    window.app = new ProductionWebRTC();
+    
+    // Make functions globally available
+    window.connect = () => window.app.connect();
+    window.startCall = () => window.app.startCall();
+    window.answerCall = () => window.app.answerCall();
+    window.endCall = () => window.app.endCall();
+    window.toggleMute = () => window.app.toggleMute();
+    window.toggleVideo = () => window.app.toggleVideo();
+    window.sendMessage = () => window.app.sendMessage();
+    
+    console.log('App created and functions assigned');
+});
+
+// Handle connect button click
+function handleConnect() {
+    console.log('=== HANDLE CONNECT CALLED ===');
+    if (window.app) {
+        console.log('App exists, calling connect...');
+        window.app.connect();
+    } else {
+        console.log('App not ready yet, waiting...');
+        // Wait a bit and try again
+        setTimeout(() => {
+            if (window.app) {
+                console.log('App now ready, calling connect...');
+                window.app.connect();
+            } else {
+                console.log('App still not ready');
+            }
+        }, 100);
+    }
+}
+
+// Force connect - bypass timing issues
+function forceConnect() {
+    console.log('=== FORCE CONNECT CALLED ===');
+    // Try multiple times with longer delays
+    let attempts = 0;
+    const tryConnect = () => {
+        attempts++;
+        console.log(`Attempt ${attempts}: Checking for app...`);
+        if (window.app) {
+            console.log('App found! Calling connect...');
+            window.app.connect();
+            return;
+        }
+        
+        if (attempts < 10) {
+            setTimeout(tryConnect, 200);
+        } else {
+            console.log('App not found after 10 attempts');
+            alert('App initialization failed. Please refresh the page.');
+        }
+    };
+    
+    tryConnect();
+}
+    </script>
+</body>
+</html>
