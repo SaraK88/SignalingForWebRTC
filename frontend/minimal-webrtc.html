@@ -55,7 +55,7 @@
             peerConnection: null,
             stompClient: null,
             isInCall: false,
-            backendUrl: 'http://localhost:8081'
+            backendUrl: 'https://test.hitract.se' // Update with your backend URL
         };
 
         function updateStatus(text) {
@@ -110,7 +110,7 @@
         async function sendSignalingMessage(message) {
             try {
                 console.log('Sending via HTTP fallback:', message);
-                const response = await fetch(`${app.backendUrl}/api/v1/signaling/signaling`, {
+                const response = await fetch(`${app.backendUrl}/api/signaling/signaling`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(message)
@@ -145,7 +145,7 @@
                         updateStatus('Connected');
                         document.getElementById('startCallBtn').disabled = false;
                         
-                        fetch(app.backendUrl + '/api/v1/signaling/rooms/' + app.room + '/join', {
+                        fetch(app.backendUrl + '/api/signaling/rooms/' + app.room + '/join', {
                             method: 'POST',
                             headers: {'Content-Type': 'application/json'},
                             body: JSON.stringify({username: app.username})
