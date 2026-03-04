@@ -75,14 +75,14 @@
                 console.log('Answer button found:', answerBtn);
                 answerBtn.style.display = 'inline-block';
                 console.log('Answer button should now be visible');
-            } 
-            else if (data.type === 'answer' && app.isInCall && app.peerConnection) {
-                setTimeout(() => {
-                    app.peerConnection.setRemoteDescription(data.answer)
-                        .then(() => console.log('Remote answer set successfully'))
-                        .catch(error => console.error('Error setting remote answer:', error));
-                }, 100); // 100ms delay
-            } 
+            }
+            else if (data.type === 'answer' && app.isInCall && app.peerConnection &&
+                app.peerConnection.signalingState === 'have-local-offer') {
+                app.peerConnection.setRemoteDescription(data.answer)
+                    .then(() => console.log('Remote answer set successfully'))
+                    .catch(error => console.error('Error setting remote answer:', error));
+            }
+
             else if (data.type === 'ice-candidate' && app.peerConnection) {
                 console.log('Processing ICE candidate:', data.candidate);
                 if (app.peerConnection.remoteDescription) {
