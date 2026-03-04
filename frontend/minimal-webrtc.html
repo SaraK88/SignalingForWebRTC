@@ -62,6 +62,71 @@
             document.getElementById('status').textContent = text;
         }
 
+        function handleSignaling(data) {
+            console.log('=== HANDLE SIGNALING ===');
+            console.log('Received data:', data);
+            console.log('data.type:', data.type);
+            console.log('app.isInCall:', app.isInCall);
+            
+            if (data.type === 'offer' && !app.isInCall) {
+                console.log('Processing offer...');
+                app.pendingOffer = data.offer;
+                const answerBtn = document.getElementById('answerCallBtn');
+                console.log('Answer button found:', answerBtn);
+                answerBtn.style.display = 'inline-block';
+                console.log('Answer button should now be visible');
+            } 
+            else if (data.type === 'answer' && app.isInCall && app.peerConnection) {
+                setTimeout(() => {
+                    app.peerConnection.setRemoteDescription(data.answer)
+                        .then(() => console.log('Remote answer set successfully'))
+                        .catch(error => console.error('Error setting remote answer:', error));
+                }, 100); // 100ms delay
+            } 
+            else if (data.type === 'ice-candidate' && app.peerConnection) {
+                console.log('Processing ICE candidate:', data.candidate);
+                if (app.peerConnection.remoteDescription) {
+                    app.peerConnection.addIceCandidate(data.candidate)
+                        .then(() => console.log('ICE candidate added successfully'))
+                        .catch(error => console.error('Error adding ICE candidate:', error));
+                } else {
+                    console.log('Queuing ICE candidate for later...');
+                    if (!app.pendingIceCandidates) {
+                        app.pendingIceCandidates = [];
+                    }
+                    app.pendingIceCandidates.push(data.candidate);
+                }
+            } 
+            else if (data.type === 'call-ended') {
+                console.log('Call ended by:', data.from);
+                if (app.isInCall) {
+                    endCall();
+                }
+            }
+            
+            console.log('=== HANDLE SIGNALING END ===');
+        }
+
+        async function sendSignalingMessage(message) {
+            try {
+                console.log('Sending via HTTP fallback:', message);
+                const response = await fetch(`${app.backendUrl}/api/v1/signaling/signaling`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(message)
+                });
+                
+                if (!response.ok) {
+                    throw new Error('HTTP signaling failed');
+                }
+                
+                console.log('HTTP signaling response:', response);
+                
+            } catch (error) {
+                console.error('Send signaling error:', error);
+            }
+        }
+
         function connect() {
             app.username = document.getElementById('username').value;
             app.room = document.getElementById('room').value;
@@ -94,26 +159,6 @@
                 });
         }
 
-        async function sendSignalingMessage(message) {
-            try {
-                console.log('Sending via HTTP fallback:', message);
-                const response = await fetch(`${app.backendUrl}/api/v1/signaling/signaling`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(message)
-                });
-                
-                if (!response.ok) {
-                    throw new Error('HTTP signaling failed');
-                }
-                
-                console.log('HTTP signaling response:', response);
-                
-            } catch (error) {
-                console.error('Send signaling error:', error);
-            }
-        }
-
         function startCall() {
             console.log('=== START CALL ===');
             console.log('app.localStream:', app.localStream);
@@ -137,10 +182,7 @@
                 iceServers: [{urls: 'stun:stun.l.google.com:19302'}]
             });
             
-            app.localStream.getTracks().forEach(track => {
-                app.peerConnection.addTrack(track, app.localStream);
-            });
-            
+            // Handle remote stream
             app.peerConnection.ontrack = (e) => {
                 document.getElementById('remoteVideo').srcObject = e.streams[0];
                 updateStatus('Connected');
@@ -158,6 +200,10 @@
                     });
                 }
             };
+            
+            app.localStream.getTracks().forEach(track => {
+                app.peerConnection.addTrack(track, app.localStream);
+            });
             
             app.peerConnection.createOffer()
                 .then(offer => app.peerConnection.setLocalDescription(offer))
@@ -230,7 +276,20 @@
                         from: app.username,
                         room: app.room
                     });
+                    
                     console.log('=== ANSWER CALL END ===');
+                })
+                .then(() => {
+                    // Add pending ICE candidates after local description is set
+                    if (app.pendingIceCandidates && app.pendingIceCandidates.length > 0) {
+                        console.log('Adding pending ICE candidates...');
+                        app.pendingIceCandidates.forEach(candidate => {
+                            app.peerConnection.addIceCandidate(candidate)
+                                .then(() => console.log('Pending ICE candidate added'))
+                                .catch(error => console.error('Error adding pending ICE candidate:', error));
+                        });
+                        app.pendingIceCandidates = [];
+                    }
                 })
                 .catch(error => {
                     console.error('Answer call error:', error);
@@ -274,40 +333,6 @@
             document.getElementById('endCallBtn').disabled = true;
             
             console.log('=== END CALL COMPLETE ===');
-        }
-
-        function handleSignaling(data) {
-            console.log('=== HANDLE SIGNALING ===');
-            console.log('Received data:', data);
-            console.log('data.type:', data.type);
-            console.log('app.isInCall:', app.isInCall);
-            
-            if (data.type === 'offer' && !app.isInCall) {
-                console.log('Processing offer...');
-                // Reset isInCall to false since we're receiving an offer
-                app.isInCall = false;
-                app.pendingOffer = data.offer;
-                const answerBtn = document.getElementById('answerCallBtn');
-                console.log('Answer button found:', answerBtn);
-                answerBtn.style.display = 'inline-block';
-                console.log('Answer button should now be visible');
-            } else if (data.type === 'answer' && app.isInCall) {
-                console.log('Processing answer...');
-                app.peerConnection.setRemoteDescription(data.answer);
-            } else if (data.type === 'ice-candidate' && app.peerConnection) {
-                console.log('Processing ICE candidate:', data.candidate);
-                app.peerConnection.addIceCandidate(data.candidate)
-                    .then(() => console.log('ICE candidate added successfully'))
-                    .catch(error => console.error('Error adding ICE candidate:', error));
-            } else if (data.type === 'call-ended') {
-                console.log('Call ended by:', data.from);
-                // Both users should end the call
-                if (app.isInCall) {
-                    endCall();
-                }
-            }
-            
-            console.log('=== HANDLE SIGNALING END ===');
         }
     </script>
 </body>
