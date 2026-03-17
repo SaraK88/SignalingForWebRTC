@@ -55,7 +55,7 @@
         peerConnection: null,
         stompClient: null,
         isInCall: false,
-        backendUrl: 'https://test.hitract.se'
+        backendUrl: 'http://localhost:8081'
     };
 
     function updateStatus(text) {
@@ -76,10 +76,22 @@
             answerBtn.style.display = 'inline-block';
             console.log('Answer button should now be visible');
         }
-        else if (data.type === 'answer' && app.isInCall && app.peerConnection &&
-            app.peerConnection.signalingState === 'have-local-offer') {
+        else if (data.type === 'answer' && app.isInCall && app.peerConnection) {
+            console.log('Processing answer...');
             app.peerConnection.setRemoteDescription(data.answer)
-                .then(() => console.log('Remote answer set successfully'))
+                .then(() => {
+                    console.log('Remote answer set successfully');
+                    // Process pending ICE candidates
+                    if (app.pendingIceCandidates && app.pendingIceCandidates.length > 0) {
+                        console.log('Processing pending ICE candidates...');
+                        app.pendingIceCandidates.forEach(candidate => {
+                            app.peerConnection.addIceCandidate(candidate)
+                                .then(() => console.log('Pending ICE candidate added'))
+                                .catch(error => console.error('Error adding pending ICE candidate:', error));
+                        });
+                        app.pendingIceCandidates = [];
+                    }
+                })
                 .catch(error => console.error('Error setting remote answer:', error));
         }
         else if (data.type === 'ice-candidate' && app.peerConnection) {
@@ -109,7 +121,7 @@
     async function sendSignalingMessage(message) {
         try {
             console.log('Sending via HTTP fallback:', message);
-            const response = await fetch(`${app.backendUrl}/api/signaling/signaling`, {
+            const response = await fetch(`${app.backendUrl}/api/v1/signaling/signaling`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'appPlatform': 'web', 'Authorization': 'Bearer user:29' },
                 body: JSON.stringify(message)
@@ -144,7 +156,7 @@
                     updateStatus('Connected');
                     document.getElementById('startCallBtn').disabled = false;
 
-                    fetch(app.backendUrl + '/api/signaling/rooms/' + app.room + '/join', {
+                    fetch(app.backendUrl + '/api/v1/signaling/rooms/' + app.room + '/join', {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json', 'appPlatform': 'web', 'Authorization': 'Bearer user:29' },
                         body: JSON.stringify({username: app.username})
