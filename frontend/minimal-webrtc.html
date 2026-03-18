@@ -121,7 +121,7 @@
     async function sendSignalingMessage(message) {
         try {
             console.log('Sending via HTTP fallback:', message);
-            const response = await fetch(`${app.backendUrl}/api/v1/signaling/signaling`, {
+            const response = await fetch(`${app.backendUrl}/api/signaling/signaling`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'appPlatform': 'web', 'Authorization': 'Bearer user:29' },
                 body: JSON.stringify(message)
@@ -156,7 +156,7 @@
                     updateStatus('Connected');
                     document.getElementById('startCallBtn').disabled = false;
 
-                    fetch(app.backendUrl + '/api/v1/signaling/rooms/' + app.room + '/join', {
+                    fetch(app.backendUrl + '/api/signaling/rooms/' + app.room + '/join', {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json', 'appPlatform': 'web', 'Authorization': 'Bearer user:29' },
                         body: JSON.stringify({username: app.username})
@@ -180,6 +180,14 @@
             return;
         }
 
+        app.peerConnection = new RTCPeerConnection({
+            iceServers: [{urls: 'stun:stun.l.google.com:19302'}, {
+                urls: 'turn:openrelay.metered.ca:80',
+                username: 'openrelayproject',
+                credential: 'openrelayproject'
+            }]
+        });
+
         // Check if there's already an active call in the room
         if (app.isInCall) {
             console.log('Already in a call, cannot start another');
@@ -188,10 +196,6 @@
         }
 
         updateStatus('Starting call...');
-
-        app.peerConnection = new RTCPeerConnection({
-            iceServers: [{urls: 'stun:stun.l.google.com:19302'}]
-        });
 
         // Handle remote stream
         app.peerConnection.ontrack = (e) => {
@@ -243,7 +247,11 @@
         document.getElementById('endCallBtn').disabled = false;
 
         app.peerConnection = new RTCPeerConnection({
-            iceServers: [{urls: 'stun:stun.l.google.com:19302'}]
+            iceServers: [{urls: 'stun:stun.l.google.com:19302'}, {
+                urls: 'turn:openrelay.metered.ca:80',
+                username: 'openrelayproject',
+                credential: 'openrelayproject'
+            }]
         });
 
         app.localStream.getTracks().forEach(track => {
